@@ -1,0 +1,19 @@
+# Core RAG & NLP
+anthropic>=0.25.0
+sentence-transformers>=2.7.0
+langchain>=0.2.0
+langchain-text-splitters>=0.2.0
+
+# Document parsing
+unstructured[pdf]>=0.13.0
+python-pptx>=0.6.23
+nbformat>=5.9.0
+
+# Vector database
+qdrant-client>=1.9.0
+
+# UI
+streamlit>=1.35.0
+
+# Utilities
+numpy>=1.26.0
