@@ -1,5 +1,5 @@
 # Core RAG & NLP
-anthropic>=0.25.0
+google-genai>=0.7.0
 sentence-transformers>=2.7.0
 langchain>=0.2.0
 langchain-text-splitters>=0.2.0

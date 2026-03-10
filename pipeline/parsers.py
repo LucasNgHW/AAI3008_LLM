@@ -23,7 +23,7 @@ def parse_pdf(path: str) -> list[dict]:
     except ImportError:
         raise ImportError("Install unstructured: pip install unstructured[pdf]")
 
-    elements = partition_pdf(path, strategy="hi_res")
+    elements = partition_pdf(path, strategy="fast")
     chunks = []
     for el in elements:
         text = el.text.strip() if el.text else ""

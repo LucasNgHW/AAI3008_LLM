@@ -30,7 +30,7 @@ nlp-assistant/
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=your_key_here
+export GEMINI_API_KEY=your_key_here
 ```
 
 ## Usage

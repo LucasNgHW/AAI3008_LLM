@@ -1,0 +1,62 @@
+[
+  {
+    "question": "What is tokenization?",
+    "relevant_sources": ["AAI3008_Lec2_TextProcessing.pdf"],
+    "relevant_topics": ["tokenisation"]
+  },
+  {
+    "question": "What is self-attention?",
+    "relevant_sources": ["AAI3008_Lec3_Transformer.pdf"],
+    "relevant_topics": ["transformers"]
+  },
+  {
+    "question": "What is natural language processing?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec1_Introduction.pdf"],
+    "relevant_topics": ["nlp"]
+  },
+  {
+    "question": "What are some applications of NLP?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec1_Introduction.pdf"],
+    "relevant_topics": ["nlp"]
+  },
+  {
+    "question": "What is tokenization in NLP?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec2_TextProcessing.pdf"],
+    "relevant_topics": ["tokenisation"]
+  },
+  {
+    "question": "Why is tokenization important in text processing?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec2_TextProcessing.pdf"],
+    "relevant_topics": ["tokenisation"]
+  },
+  {
+    "question": "What are tokens in text processing?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec2_TextProcessing.pdf"],
+    "relevant_topics": ["tokenisation"]
+  },
+  {
+    "question": "What is self-attention in transformers?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec3_Transformer.pdf"],
+    "relevant_topics": ["transformers"]
+  },
+  {
+    "question": "What problem do transformers solve compared to previous NLP models?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec3_Transformer.pdf"],
+    "relevant_topics": ["transformers"]
+  },
+  {
+    "question": "What does the attention mechanism do in a transformer?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec3_Transformer.pdf"],
+    "relevant_topics": ["transformers"]
+  },
+  {
+    "question": "Why is self-attention useful in language models?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec3_Transformer.pdf"],
+    "relevant_topics": ["transformers"]
+  },
+  {
+    "question": "What are some challenges in natural language processing?",
+    "relevant_sources": ["./data/raw/AAI3008_Lec1_Introduction.pdf"],
+    "relevant_topics": ["nlp"]
+  }
+]

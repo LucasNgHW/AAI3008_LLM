@@ -13,7 +13,14 @@ Features:
 Run with:
     streamlit run app/ui.py
 """
+import os
+import sys
 
+# Add project root (parent of /app) to Python path
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+    
 import streamlit as st
 from rag.retriever import retrieve_with_context
 from rag.reranker  import rerank

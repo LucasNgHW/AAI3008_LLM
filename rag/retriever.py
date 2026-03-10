@@ -53,14 +53,25 @@ def retrieve(
 
     qdrant_filter = Filter(must=conditions) if conditions else None
 
-    results = client.search(
-        collection_name=COLLECTION_NAME,
-        query_vector=qvector,
-        limit=top_k,
-        query_filter=qdrant_filter,
-        score_threshold=score_threshold,
-        with_payload=True,
-    )
+    try:
+        results = client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=qvector,
+            limit=top_k,
+            query_filter=qdrant_filter,
+            score_threshold=score_threshold,
+            with_payload=True,
+        )
+    except AttributeError:
+        res = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=qvector,
+            limit=top_k,
+            query_filter=qdrant_filter,
+            score_threshold=score_threshold,
+            with_payload=True,
+        )
+        results = getattr(res, "points", res)
 
     return [
         {

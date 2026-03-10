@@ -10,21 +10,20 @@ Prompt design principles:
   4. Includes the last N conversation turns for multi-turn coherence
 """
 
-import anthropic
+import os
+from google import genai
 
-MODEL        = "claude-sonnet-4-6"
-MAX_TOKENS   = 1024
-HISTORY_WINDOW = 5   # number of previous turns to include in the prompt
+MODEL = "gemini-2.5-flash"
+HISTORY_WINDOW = 5  
 
-_client: anthropic.Anthropic | None = None
+_client: genai.Client | None = None
 
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+        _client = genai.Client()
     return _client
-
 
 # ── Prompt assembly ───────────────────────────────────────────────────────────
 
@@ -112,10 +111,9 @@ def generate_answer(
     system_prompt = build_system_prompt(user_profile)
     user_prompt   = build_user_prompt(query, chunks, conversation_history)
 
-    response = client.messages.create(
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    response = client.models.generate_content(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+        contents=full_prompt,
     )
-    return response.content[0].text
+    return response.text

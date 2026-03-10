@@ -1,0 +1,22 @@
+{
+  "user_id": "student_1",
+  "query_history": [
+    "tell me about tokenisation",
+    "how about embeddings",
+    "how about transformers",
+    "tell me more",
+    "summarise the materials"
+  ],
+  "topic_counts": {
+    "tokenisation": 3,
+    "embeddings": 1,
+    "transformers": 1
+  },
+  "difficulty_scores": [
+    2,
+    2,
+    2,
+    2,
+    2
+  ]
+}

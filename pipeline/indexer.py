@@ -115,8 +115,12 @@ def collection_info() -> dict:
     """Return basic stats about the collection."""
     client = get_client()
     info = client.get_collection(COLLECTION_NAME)
+
+    vectors_count = getattr(info, "vectors_count", None)
+    points_count  = getattr(info, "points_count", None)
+
     return {
-        "name":         COLLECTION_NAME,
-        "vectors_count": info.vectors_count,
-        "status":       info.status,
+        "name": COLLECTION_NAME,
+        "vectors_count": vectors_count if vectors_count is not None else points_count,
+        "status": getattr(info, "status", None),
     }
