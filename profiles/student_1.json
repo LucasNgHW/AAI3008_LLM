@@ -5,14 +5,16 @@
     "how about embeddings",
     "how about transformers",
     "tell me more",
-    "summarise the materials"
+    "summarise the materials",
+    "BERT\n"
   ],
   "topic_counts": {
     "tokenisation": 3,
     "embeddings": 1,
-    "transformers": 1
+    "transformers": 2
   },
   "difficulty_scores": [
+    2,
     2,
     2,
     2,
