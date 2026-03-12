@@ -17,23 +17,43 @@ from pathlib import Path
 
 
 def parse_pdf(path: str) -> list[dict]:
-    """Extract text from a PDF using the unstructured library."""
+    """Extract text from a PDF using the unstructured library and merge nearby elements."""
     try:
         from unstructured.partition.pdf import partition_pdf
     except ImportError:
         raise ImportError("Install unstructured: pip install unstructured[pdf]")
 
     elements = partition_pdf(path, strategy="fast")
-    chunks = []
+
+    blocks = []
+    buffer = []
+
     for el in elements:
         text = el.text.strip() if el.text else ""
-        if text:
-            chunks.append({
-                "text": text,
+        if not text:
+            continue
+
+        buffer.append(text)
+
+        # Merge every ~5 elements into one block
+        if len(buffer) >= 5:
+            combined = "\n".join(buffer)
+            blocks.append({
+                "text": combined,
                 "source": path,
                 "content_type": "pdf",
             })
-    return chunks
+            buffer = []
+
+    # Flush remaining buffer
+    if buffer:
+        blocks.append({
+            "text": "\n".join(buffer),
+            "source": path,
+            "content_type": "pdf",
+        })
+
+    return blocks
 
 
 def parse_pptx(path: str) -> list[dict]:
