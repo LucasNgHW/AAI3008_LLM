@@ -6,14 +6,18 @@
     "how about transformers",
     "tell me more",
     "summarise the materials",
-    "BERT\n"
+    "BERT\n",
+    "I want it to be more detailed",
+    "BERT"
   ],
   "topic_counts": {
-    "tokenisation": 3,
+    "tokenisation": 4,
     "embeddings": 1,
-    "transformers": 2
+    "transformers": 3
   },
   "difficulty_scores": [
+    2,
+    2,
     2,
     2,
     2,

@@ -30,7 +30,6 @@ nlp-assistant/
 
 ```bash
 pip install -r requirements.txt
-export GEMINI_API_KEY=your_key_here
 ```
 
 ## Usage
@@ -48,6 +47,7 @@ python ingest.py --dir path/to/files  # custom source directory
 ### 2. Run the chat interface
 
 ```bash
+export GEMINI_API_KEY=your_key_here
 streamlit run app/ui.py
 ```
 

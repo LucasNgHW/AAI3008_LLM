@@ -6,17 +6,14 @@ retrieved chunks using full query-passage attention.
 
 Model: cross-encoder/ms-marco-MiniLM-L-6-v2
   - Trained on MS MARCO passage ranking
-  - Takes (query, passage) pairs as input and outputs a relevance score
-  - Significantly more accurate than bi-encoder similarity but ~3–5x slower
+  - Takes (query, passage) pairs and outputs a relevance logit
+  - More accurate than bi-encoder similarity; ~3–5× slower on CPU
 
-Usage:
-  chunks  = retriever.retrieve(query, top_k=20)   # over-retrieve
-  reranked = reranker.rerank(query, chunks, top_n=5)  # then rerank to top 5
+Typical usage:
+    chunks   = retriever.retrieve(query, top_k=20)      # over-retrieve
+    reranked = reranker.rerank(query, chunks, top_n=5)  # prune to top 5
 
-Latency note (Week 8): adds ~600 ms per query on CPU. Mitigations being explored:
-  - Reduce top_k passed to reranker (e.g. 10 → 5)
-  - Cache reranker scores for repeated queries
-  - Switch to a lighter bi-encoder rescoring model if latency remains unacceptable
+Latency note: ~600 ms/query on CPU with the 6-layer MiniLM model.
 """
 
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -36,31 +33,32 @@ def get_reranker() -> CrossEncoder:
 
 def rerank(query: str, chunks: list[dict], top_n: int = 5) -> list[dict]:
     """
-    Re-score a list of retrieved chunks using the cross-encoder and return
-    the top_n highest-scoring results.
+    Re-score retrieved chunks with the cross-encoder and return the top_n.
+
+    The input list is NOT mutated; each returned dict is a shallow copy with
+    a new "rerank_score" key added alongside the original "score".
 
     Args:
-        query:   The student's original question.
-        chunks:  Retrieved chunks from retriever.retrieve() (first-stage).
+        query:   The student's original question (not the augmented query).
+        chunks:  First-stage retrieved chunks from retriever.retrieve().
         top_n:   Number of chunks to return after reranking.
 
     Returns:
-        List of top_n chunk dicts, sorted by descending reranker score.
-        Each chunk gains a "rerank_score" field alongside the original "score".
+        List of top_n chunk dicts sorted by descending rerank_score.
     """
     if not chunks:
         return []
 
     reranker = get_reranker()
+    pairs    = [(query, chunk["text"]) for chunk in chunks]
+    scores   = reranker.predict(pairs)   # numpy array of floats
 
-    # Cross-encoder expects (query, passage) pairs
-    pairs = [(query, chunk["text"]) for chunk in chunks]
-    scores = reranker.predict(pairs)  # returns numpy array of floats
-
-    # Attach reranker scores
+    # Build copies so we never mutate the caller's list
+    scored = []
     for chunk, score in zip(chunks, scores):
-        chunk["rerank_score"] = float(score)
+        entry = dict(chunk)
+        entry["rerank_score"] = float(score)
+        scored.append(entry)
 
-    # Sort descending by reranker score and return top_n
-    reranked = sorted(chunks, key=lambda c: c["rerank_score"], reverse=True)
-    return reranked[:top_n]
+    scored.sort(key=lambda c: c["rerank_score"], reverse=True)
+    return scored[:top_n]

@@ -1,10 +1,7 @@
 # Core RAG & NLP
 google-genai>=0.7.0
 sentence-transformers>=2.7.0
-langchain==0.0.354
-langchain-community==0.0.20
-langchain-core==0.1.23
-langsmith==0.0.87
+langchain-text-splitters>=0.2.0
 
 # Document parsing
 unstructured[pdf]>=0.13.0
