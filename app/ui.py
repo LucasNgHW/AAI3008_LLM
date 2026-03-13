@@ -3,18 +3,23 @@ app/ui.py
 ---------
 Streamlit chat interface for the NLP Learning Assistant.
 
-Features:
-  - Chat loop with full session state and message history display
-  - Multi-turn dialogue: last 5 user+assistant turns injected into RAG prompt
-  - Personalisation sidebar: inferred difficulty, top topics, recommended topics
-  - Optional topic and difficulty filters for targeted retrieval
-  - Retrieved source display (expandable) below each assistant answer
+Features
+--------
+- Chat loop with full session state and message history display
+- Multi-turn dialogue: last 5 turns injected into the RAG prompt
+- Personalisation sidebar: inferred difficulty, top topics, recommended topics
+- Optional topic and difficulty filters for targeted retrieval
+- Retrieved source display (expandable) below each assistant answer
+- Streaming generation: answer renders token-by-token via st.write_stream
+- Per-component latency display (opt-in toggle)
 
 Session state keys
 ------------------
-  messages      list[dict]   full conversation history
-  profile_cache dict         cached profile.to_dict() — refreshed after each turn
-  profile_id    str          user_id the cache belongs to (invalidated on ID change)
+  messages       list[dict]   full conversation history
+  profile_obj    UserProfile  cached profile object
+  profile_id     str          user_id the cache belongs to
+  profile_stale  bool         if True, reload profile on next get_profile() call
+  models_warmed  bool         True after one-time model warmup has run
 
 Run with:
     streamlit run app/ui.py
@@ -22,15 +27,16 @@ Run with:
 
 import os
 import sys
+import time
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 import streamlit as st
-from rag.retriever          import retrieve_with_context
-from rag.reranker           import rerank
-from rag.generator          import generate_answer
+from rag.retriever            import retrieve_with_context
+from rag.reranker             import rerank
+from rag.generator            import stream_answer
 from personalisation.user_profile import UserProfile
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -40,13 +46,20 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Helper: get or refresh the cached UserProfile ─────────────────────────────
+# ── One-time model warmup ──────────────────────────────────────────────────────
+# Pays the cold-start cost (~3 s) before the first query arrives.
+
+if not st.session_state.get("models_warmed"):
+    with st.spinner("Loading models…"):
+        from pipeline.embedder import warmup as embed_warmup
+        from rag.reranker       import warmup as rerank_warmup
+        embed_warmup()
+        rerank_warmup()
+    st.session_state["models_warmed"] = True
+
+# ── Profile helpers ────────────────────────────────────────────────────────────
 
 def get_profile(user_id: str) -> UserProfile:
-    """
-    Return a UserProfile, loading from disk only when the user_id changes
-    or when explicitly invalidated (profile_stale flag).
-    """
     if (
         "profile_obj" not in st.session_state
         or st.session_state.get("profile_id") != user_id
@@ -58,8 +71,7 @@ def get_profile(user_id: str) -> UserProfile:
     return st.session_state["profile_obj"]
 
 
-def refresh_profile_cache(user_id: str) -> None:
-    """Force a disk reload on the next get_profile() call."""
+def refresh_profile_cache(_: str) -> None:
     st.session_state["profile_stale"] = True
 
 
@@ -89,9 +101,10 @@ with st.sidebar:
         "Any", "tokenisation", "embeddings", "language_models", "transformers",
         "sentiment", "named_entity", "parsing", "text_classification",
     ]
-    topic_sel    = st.selectbox("Topic",       TOPICS)
-    diff_sel     = st.selectbox("Difficulty",  ["Any", "beginner", "intermediate", "advanced"])
+    topic_sel    = st.selectbox("Topic",      TOPICS)
+    diff_sel     = st.selectbox("Difficulty", ["Any", "beginner", "intermediate", "advanced"])
     use_reranker = st.toggle("Enable reranker (more accurate, slower)", value=True)
+    show_timings = st.toggle("Show latency breakdown", value=False)
 
     st.divider()
     if st.button("Clear conversation"):
@@ -106,12 +119,11 @@ if "messages" not in st.session_state:
 st.title("NLP Learning Assistant")
 st.caption(
     "Ask anything about your NLP course. "
-    "I'll retrieve the most relevant course material and tailor my answer to your level."
+    "I'll retrieve the most relevant material and tailor the answer to your level."
 )
 
 
 def render_sources(sources: list[dict]) -> None:
-    """Render an expandable source panel."""
     with st.expander("📄 Retrieved sources", expanded=False):
         for i, src in enumerate(sources, start=1):
             score_val = src.get("rerank_score", src.get("score", "?"))
@@ -126,36 +138,45 @@ def render_sources(sources: list[dict]) -> None:
             st.caption(preview)
 
 
-# Render conversation history
+def render_timings(timings: dict) -> None:
+    total = sum(timings.values())
+    parts = [f"**{k}:** {v*1000:.0f} ms" for k, v in timings.items()]
+    parts.append(f"**total:** {total*1000:.0f} ms")
+    st.caption("  ·  ".join(parts))
+
+
+# Render history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg["role"] == "assistant" and msg.get("sources"):
-            render_sources(msg["sources"])
+        if msg["role"] == "assistant":
+            if msg.get("sources"):
+                render_sources(msg["sources"])
+            if show_timings and msg.get("timings"):
+                render_timings(msg["timings"])
 
 # ── Handle new query ───────────────────────────────────────────────────────────
 if query := st.chat_input("Ask about NLP..."):
 
-    # Show student message immediately
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
 
     with st.chat_message("assistant"):
+
+        profile = get_profile(user_id)
+        timings: dict = {}
+
+        filter_kwargs: dict = {}
+        if topic_sel != "Any":
+            filter_kwargs["topic_filter"] = topic_sel
+        if diff_sel != "Any":
+            filter_kwargs["difficulty_filter"] = diff_sel
+
+        # Stage 1: retrieve
+        first_stage_k = 15 if use_reranker else 5
         with st.spinner("Searching course materials…"):
-
-            # Reload profile in case another session wrote to disk
-            profile = get_profile(user_id)
-
-            # Build filter kwargs from sidebar selections
-            filter_kwargs: dict = {}
-            if topic_sel != "Any":
-                filter_kwargs["topic_filter"] = topic_sel
-            if diff_sel != "Any":
-                filter_kwargs["difficulty_filter"] = diff_sel
-
-            # Stage 1: retrieve (over-fetch if reranker is active)
-            first_stage_k = 15 if use_reranker else 5
+            t0 = time.perf_counter()
             chunks = retrieve_with_context(
                 query=query,
                 conversation_history=st.session_state.messages[:-1],
@@ -163,31 +184,38 @@ if query := st.chat_input("Ask about NLP..."):
                 top_k=first_stage_k,
                 **filter_kwargs,
             )
+            timings["retrieve"] = time.perf_counter() - t0
 
-            # Stage 2: optional rerank
+            # Stage 2: rerank
             if use_reranker and chunks:
+                t0 = time.perf_counter()
                 chunks = rerank(query, chunks, top_n=5)
+                timings["rerank"] = time.perf_counter() - t0
 
-            # Stage 3: generate
-            answer = generate_answer(
+        # Stage 3: stream generation — renders tokens as they arrive
+        t0 = time.perf_counter()
+        answer = st.write_stream(
+            stream_answer(
                 query=query,
                 chunks=chunks,
                 user_profile=profile.to_dict(),
                 conversation_history=st.session_state.messages[:-1],
             )
+        )
+        timings["generate"] = time.perf_counter() - t0
 
-        st.markdown(answer)
         if chunks:
             render_sources(chunks)
+        if show_timings:
+            render_timings(timings)
 
-    # Persist assistant message (with sources for history re-render)
     st.session_state.messages.append({
         "role":    "assistant",
         "content": answer,
         "sources": chunks,
+        "timings": timings,
     })
 
-    # Log interaction and mark profile cache stale so sidebar refreshes next render
     if chunks:
         top_chunk = chunks[0]
         profile.log_interaction(
@@ -197,6 +225,4 @@ if query := st.chat_input("Ask about NLP..."):
         )
         refresh_profile_cache(user_id)
 
-    # Rerun only to refresh the sidebar profile stats — no double-render because
-    # the new messages are already in session_state and rendered above.
     st.rerun()

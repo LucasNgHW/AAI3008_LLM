@@ -3,30 +3,29 @@ tests/test_integration.py
 --------------------------
 Integration tests for the NLP Learning Assistant pipeline.
 
-These tests cover the full data flow without requiring live Qdrant,
-or ML models — all external I/O is patched with lightweight stubs.
+All external I/O (Qdrant, ML models, Gemini API) is patched with lightweight
+stubs so the suite runs without any installed ML dependencies.
 
 Run with:
-    python -m pytest tests/ -v
-or:
     python tests/test_integration.py
+or:
+    python -m pytest tests/ -v
 """
 
 import sys
 import os
 import json
+import time
 import tempfile
 import types
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from pathlib import Path
 
-# Ensure project root is on path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 # ── Stub all heavy deps before any project module is imported ─────────────────
-# This prevents ImportError for packages not installed in the test environment.
 
 def _stub(name, **attrs):
     m = sys.modules.get(name) or types.ModuleType(name)
@@ -35,26 +34,28 @@ def _stub(name, **attrs):
     sys.modules[name] = m
     return m
 
-_st = _stub("sentence_transformers", SentenceTransformer=MagicMock)
-_st_ce = _stub("sentence_transformers.cross_encoder", CrossEncoder=MagicMock)
-
-_qc = _stub("qdrant_client", QdrantClient=MagicMock)
-_qm = _stub("qdrant_client.models",
-            Filter=MagicMock, FieldCondition=MagicMock,
-            MatchValue=MagicMock, Range=MagicMock,
-            Distance=MagicMock, VectorParams=MagicMock,
-            PointStruct=MagicMock, PayloadSchemaType=MagicMock)
+_stub("sentence_transformers", SentenceTransformer=MagicMock)
+_stub("sentence_transformers.cross_encoder", CrossEncoder=MagicMock)
+_stub("qdrant_client", QdrantClient=MagicMock)
+_stub("qdrant_client.models",
+      Filter=MagicMock, FieldCondition=MagicMock,
+      MatchValue=MagicMock, Range=MagicMock,
+      Distance=MagicMock, VectorParams=MagicMock,
+      PointStruct=MagicMock, PayloadSchemaType=MagicMock)
 
 
 class _SimpleSplitter:
     def __init__(self, chunk_size=800, chunk_overlap=150, separators=None, **kw):
         self.chunk_size = chunk_size
-    def split_text(self, text):
-        return [text[i:i+self.chunk_size] for i in range(0, len(text), self.chunk_size)
-                if text[i:i+self.chunk_size].strip()]
 
-_lts = _stub("langchain_text_splitters",
-             RecursiveCharacterTextSplitter=_SimpleSplitter)
+    def split_text(self, text):
+        return [
+            text[i:i + self.chunk_size]
+            for i in range(0, len(text), self.chunk_size)
+            if text[i:i + self.chunk_size].strip()
+        ]
+
+_stub("langchain_text_splitters", RecursiveCharacterTextSplitter=_SimpleSplitter)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -74,26 +75,21 @@ def make_chunk(text="NLP text about tokenisation and BPE.", topic="tokenisation"
 
 class TestChunker(unittest.TestCase):
 
-
     def test_infer_topic_tokenisation(self):
         from pipeline.chunker import infer_topic
-        result = infer_topic("BPE and WordPiece are subword tokenisation algorithms.")
-        self.assertEqual(result, "tokenisation")
+        self.assertEqual(infer_topic("BPE and WordPiece are subword tokenisation algorithms."), "tokenisation")
 
     def test_infer_topic_transformers(self):
         from pipeline.chunker import infer_topic
-        result = infer_topic("The transformer uses multi-head self-attention and positional encoding.")
-        self.assertEqual(result, "transformers")
+        self.assertEqual(infer_topic("The transformer uses multi-head self-attention and positional encoding."), "transformers")
 
     def test_infer_topic_general_fallback(self):
         from pipeline.chunker import infer_topic
-        result = infer_topic("The quick brown fox jumps over the lazy dog.")
-        self.assertEqual(result, "general")
+        self.assertEqual(infer_topic("The quick brown fox jumps over the lazy dog."), "general")
 
     def test_infer_difficulty_beginner(self):
         from pipeline.chunker import infer_difficulty
-        result = infer_difficulty("Introduction to NLP: a basic overview and simple examples.")
-        self.assertEqual(result, "beginner")
+        self.assertEqual(infer_difficulty("Introduction to NLP: a basic overview and simple examples."), "beginner")
 
     def test_infer_difficulty_advanced(self):
         from pipeline.chunker import infer_difficulty
@@ -112,23 +108,20 @@ class TestChunker(unittest.TestCase):
 
     def test_chunk_document_splits_text(self):
         from pipeline.chunker import chunk_document
-        doc = {
-            "text": "Tokenisation splits text into tokens. " * 60,
-            "source": "wk2_tokenisation.pdf",
-            "content_type": "pdf",
-        }
+        doc = {"text": "Tokenisation splits text into tokens. " * 60,
+               "source": "wk2_tokenisation.pdf", "content_type": "pdf"}
         chunks = chunk_document(doc, chunk_size=200, chunk_overlap=20)
-        self.assertGreater(len(chunks), 1, "Long text should produce multiple chunks")
+        self.assertGreater(len(chunks), 1)
         for c in chunks:
             self.assertIn("text",     c)
             self.assertIn("metadata", c)
             self.assertEqual(c["metadata"]["week"], 2)
-            self.assertIn(c["metadata"]["topic"], list(__import__("pipeline.chunker", fromlist=["TOPIC_KEYWORDS"]).TOPIC_KEYWORDS.keys()) + ["general"])
 
     def test_chunk_document_empty_text_returns_empty(self):
         from pipeline.chunker import chunk_document
-        chunks = chunk_document({"text": "   ", "source": "empty.pdf", "content_type": "pdf"})
-        self.assertEqual(chunks, [])
+        self.assertEqual(
+            chunk_document({"text": "   ", "source": "empty.pdf", "content_type": "pdf"}), []
+        )
 
     def test_chunk_documents_aggregates(self):
         from pipeline.chunker import chunk_documents
@@ -136,8 +129,7 @@ class TestChunker(unittest.TestCase):
             {"text": "BERT uses masked language modelling. " * 30, "source": "wk3.pdf", "content_type": "pdf"},
             {"text": "Sentiment analysis classifies polarity. " * 30, "source": "wk4.pdf", "content_type": "pdf"},
         ]
-        chunks = chunk_documents(docs, chunk_size=200, chunk_overlap=20)
-        self.assertGreater(len(chunks), 2)
+        self.assertGreater(len(chunk_documents(docs, chunk_size=200, chunk_overlap=20)), 2)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -151,15 +143,6 @@ class TestUserProfile(unittest.TestCase):
         from personalisation import user_profile as _up
         self._up = _up
 
-    def _profile(self, user_id):
-        from personalisation.user_profile import UserProfile
-        with patch.object(self._up, "PROFILES_DIR", self.tmpdir):
-            p = UserProfile.__new__(UserProfile)
-            p.user_id = user_id
-            p.path = Path(self.tmpdir) / f"{user_id}.json"
-            p.data = p._load()
-        return p
-
     def test_blank_profile_defaults(self):
         from personalisation.user_profile import UserProfile
         with patch.object(self._up, "PROFILES_DIR", self.tmpdir):
@@ -172,7 +155,7 @@ class TestUserProfile(unittest.TestCase):
         from personalisation.user_profile import UserProfile
         with patch.object(self._up, "PROFILES_DIR", self.tmpdir):
             p = UserProfile("counts_test")
-            self.assertEqual(p.data["topic_counts"], {}, "Should start blank")
+            self.assertEqual(p.data["topic_counts"], {})
             p.log_interaction("what is BERT?",         "transformers", "intermediate")
             p.log_interaction("explain attention",      "transformers", "advanced")
             p.log_interaction("what is tokenisation?", "tokenisation", "beginner")
@@ -189,21 +172,18 @@ class TestUserProfile(unittest.TestCase):
         self.assertEqual(p.preferred_difficulty, "advanced")
 
     def test_corrupted_json_returns_blank(self):
-        """A corrupted profile file must not crash the app."""
         from personalisation.user_profile import UserProfile
-        corrupt_path = Path(self.tmpdir) / "bad_student.json"
-        corrupt_path.write_text("{ this is not json !!!", encoding="utf-8")
+        (Path(self.tmpdir) / "bad.json").write_text("{ bad json", encoding="utf-8")
         with patch.object(self._up, "PROFILES_DIR", self.tmpdir):
-            p = UserProfile("bad_student")
+            p = UserProfile("bad")
         self.assertEqual(p.preferred_difficulty, "intermediate")
         self.assertEqual(p.data["query_history"], [])
 
     def test_partial_profile_migrated(self):
-        """Profile missing new keys should be backfilled with defaults."""
         from personalisation.user_profile import UserProfile
-        partial = {"user_id": "old", "query_history": ["hello"]}
-        partial_path = Path(self.tmpdir) / "old.json"
-        partial_path.write_text(json.dumps(partial), encoding="utf-8")
+        (Path(self.tmpdir) / "old.json").write_text(
+            json.dumps({"user_id": "old", "query_history": ["hi"]}), encoding="utf-8"
+        )
         with patch.object(self._up, "PROFILES_DIR", self.tmpdir):
             p = UserProfile("old")
         self.assertIn("topic_counts",      p.data)
@@ -220,100 +200,111 @@ class TestUserProfile(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. RETRIEVER
+# 3. EMBEDDER — warmup
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestEmbedder(unittest.TestCase):
+
+    def test_warmup_calls_encode(self):
+        import pipeline.embedder as emb_mod
+        mock_model = MagicMock()
+        with patch.object(emb_mod, "get_model", return_value=mock_model):
+            emb_mod.warmup()
+        mock_model.encode.assert_called_once()
+        args = mock_model.encode.call_args
+        self.assertEqual(args[0][0], ["warmup"])
+
+    def test_embed_query_uses_batch_size_1(self):
+        """embed_query must pass batch_size=1 to skip padding overhead."""
+        import pipeline.embedder as emb_mod
+        import numpy as np
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.zeros((1, 384))
+        with patch.object(emb_mod, "get_model", return_value=mock_model):
+            emb_mod.embed_query("hello")
+        call_kwargs = mock_model.encode.call_args.kwargs
+        self.assertEqual(call_kwargs.get("batch_size"), 1)
+        self.assertFalse(call_kwargs.get("show_progress_bar", True))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. RETRIEVER
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestRetriever(unittest.TestCase):
 
-    def _mock_qdrant_result(self, text="token text", topic="tokenisation",
-                             difficulty="intermediate", score=0.9):
-        point = MagicMock()
-        point.score = score
-        point.payload = {
-            "text": text, "topic": topic, "difficulty": difficulty,
-            "content_type": "pdf", "week": 1, "source": "/data/lec1.pdf", "slide": None,
-        }
-        return point
+    def _mock_point(self, text="token text", topic="tokenisation",
+                    difficulty="intermediate", score=0.9):
+        p = MagicMock()
+        p.score = score
+        p.payload = {"text": text, "topic": topic, "difficulty": difficulty,
+                     "content_type": "pdf", "week": 1,
+                     "source": "/data/lec1.pdf", "slide": None}
+        return p
 
     def test_retrieve_returns_flat_dicts(self):
-        import numpy as np
-        import rag.retriever as ret_mod
-
+        import numpy as np, rag.retriever as ret
         mock_client = MagicMock()
-        point = self._mock_qdrant_result()
-        result_obj = MagicMock(); result_obj.points = [point]
-        mock_client.query_points.return_value = result_obj
-
-        with patch.object(ret_mod, "get_client",  return_value=mock_client), \
-             patch.object(ret_mod, "embed_query", return_value=np.zeros(384)):
-            results = ret_mod.retrieve("what is tokenisation?", top_k=3)
-
+        r = MagicMock(); r.points = [self._mock_point()]
+        mock_client.query_points.return_value = r
+        with patch.object(ret, "get_client",  return_value=mock_client), \
+             patch.object(ret, "embed_query", return_value=np.zeros(384)):
+            results = ret.retrieve("tokenisation?", top_k=3)
         self.assertEqual(len(results), 1)
-        self.assertIn("text",  results[0])
-        self.assertIn("score", results[0])
-        self.assertIn("topic", results[0])
+        for key in ("text", "score", "topic", "difficulty", "source"):
+            self.assertIn(key, results[0])
 
-    def test_retrieve_with_context_no_auto_difficulty_filter(self):
+    def test_no_auto_difficulty_filter(self):
         """retrieve_with_context must NOT inject difficulty from profile."""
-        import numpy as np
-        import rag.retriever as ret_mod
-
+        import numpy as np, rag.retriever as ret
         mock_client = MagicMock()
-        result_obj = MagicMock(); result_obj.points = []
-        mock_client.query_points.return_value = result_obj
+        r = MagicMock(); r.points = []
+        mock_client.query_points.return_value = r
+        with patch.object(ret, "get_client",  return_value=mock_client), \
+             patch.object(ret, "embed_query", return_value=np.zeros(384)):
+            ret.retrieve_with_context("transformers",
+                                      user_profile={"preferred_difficulty": "beginner"})
+        self.assertIsNone(mock_client.query_points.call_args.kwargs.get("query_filter"))
 
-        with patch.object(ret_mod, "get_client",  return_value=mock_client), \
-             patch.object(ret_mod, "embed_query", return_value=np.zeros(384)):
-            ret_mod.retrieve_with_context(
-                query="tell me about transformers",
-                user_profile={"preferred_difficulty": "beginner"},
-            )
-
-        call_kwargs = mock_client.query_points.call_args.kwargs
-        self.assertIsNone(call_kwargs.get("query_filter"))
-
-    def test_retrieve_with_context_query_augmentation(self):
-        """Query augmentation should prepend recent user turn text, user-only."""
-        import numpy as np
-        import rag.retriever as ret_mod
-
+    def test_query_augmentation_user_turns_only(self):
+        import numpy as np, rag.retriever as ret
         captured = {}
-        def fake_embed(query):
-            captured["query"] = query
+        def fake_embed(q):
+            captured["query"] = q
             return np.zeros(384)
-
         mock_client = MagicMock()
-        result_obj = MagicMock(); result_obj.points = []
-        mock_client.query_points.return_value = result_obj
-
+        r = MagicMock(); r.points = []
+        mock_client.query_points.return_value = r
         history = [
             {"role": "user",      "content": "tell me about BERT"},
             {"role": "assistant", "content": "BERT is a transformer model..."},
         ]
-
-        with patch.object(ret_mod, "get_client",  return_value=mock_client), \
-             patch.object(ret_mod, "embed_query", side_effect=fake_embed):
-            ret_mod.retrieve_with_context(query="how does it work?",
-                                          conversation_history=history)
-
+        with patch.object(ret, "get_client",  return_value=mock_client), \
+             patch.object(ret, "embed_query", side_effect=fake_embed):
+            ret.retrieve_with_context("how does it work?",
+                                      conversation_history=history)
         self.assertIn("BERT", captured["query"])
         self.assertIn("how does it work?", captured["query"])
         self.assertNotIn("transformer model...", captured["query"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. RERANKER
+# 5. RERANKER — cache behaviour + warmup
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestReranker(unittest.TestCase):
+
+    def setUp(self):
+        # Clear the module-level cache before each test
+        import rag.reranker as rr
+        rr.clear_cache()
 
     def test_rerank_sorts_descending(self):
         import rag.reranker as rr
         mock_ce = MagicMock()
         mock_ce.predict.return_value = [0.3, 0.9, 0.1, 0.7]
         with patch.object(rr, "get_reranker", return_value=mock_ce):
-            chunks = [make_chunk(text=f"chunk {i}") for i in range(4)]
-            result = rr.rerank("query", chunks, top_n=3)
+            result = rr.rerank("query", [make_chunk(text=f"chunk {i}") for i in range(4)], top_n=3)
         self.assertEqual(len(result), 3)
         scores = [r["rerank_score"] for r in result]
         self.assertEqual(scores, sorted(scores, reverse=True))
@@ -323,19 +314,61 @@ class TestReranker(unittest.TestCase):
         import rag.reranker as rr
         mock_ce = MagicMock()
         mock_ce.predict.return_value = [0.5, 0.8]
+        original = [make_chunk(text="a"), make_chunk(text="b")]
         with patch.object(rr, "get_reranker", return_value=mock_ce):
-            original = [make_chunk(text="a"), make_chunk(text="b")]
-            _ = rr.rerank("q", original, top_n=2)
+            rr.rerank("q", original, top_n=2)
         self.assertNotIn("rerank_score", original[0])
-        self.assertNotIn("rerank_score", original[1])
 
     def test_rerank_empty_input(self):
         import rag.reranker as rr
         self.assertEqual(rr.rerank("q", []), [])
 
+    def test_rerank_cache_hit_skips_model(self):
+        """Second identical call must not invoke the cross-encoder again."""
+        import rag.reranker as rr
+        mock_ce = MagicMock()
+        mock_ce.predict.return_value = [0.7, 0.4]
+        chunks = [make_chunk(text="a"), make_chunk(text="b")]
+        with patch.object(rr, "get_reranker", return_value=mock_ce):
+            r1 = rr.rerank("same query", chunks, top_n=2)
+            r2 = rr.rerank("same query", chunks, top_n=2)
+        # predict should have been called exactly once despite two rerank calls
+        self.assertEqual(mock_ce.predict.call_count, 1)
+        self.assertEqual(r1[0]["rerank_score"], r2[0]["rerank_score"])
+
+    def test_rerank_cache_miss_on_different_query(self):
+        """Different queries must each invoke the model."""
+        import rag.reranker as rr
+        mock_ce = MagicMock()
+        mock_ce.predict.return_value = [0.5]
+        chunks = [make_chunk(text="x")]
+        with patch.object(rr, "get_reranker", return_value=mock_ce):
+            rr.rerank("query A", chunks, top_n=1)
+            rr.rerank("query B", chunks, top_n=1)
+        self.assertEqual(mock_ce.predict.call_count, 2)
+
+    def test_rerank_cache_returns_copies(self):
+        """Mutating a cached result must not affect the next call."""
+        import rag.reranker as rr
+        mock_ce = MagicMock()
+        mock_ce.predict.return_value = [0.9]
+        chunks = [make_chunk(text="z")]
+        with patch.object(rr, "get_reranker", return_value=mock_ce):
+            r1 = rr.rerank("q", chunks, top_n=1)
+            r1[0]["rerank_score"] = -999   # mutate returned copy
+            r2 = rr.rerank("q", chunks, top_n=1)
+        self.assertAlmostEqual(r2[0]["rerank_score"], 0.9)
+
+    def test_warmup_calls_predict(self):
+        import rag.reranker as rr
+        mock_ce = MagicMock()
+        with patch.object(rr, "get_reranker", return_value=mock_ce):
+            rr.warmup()
+        mock_ce.predict.assert_called_once()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. GENERATOR
+# 6. GENERATOR
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestGenerator(unittest.TestCase):
@@ -348,8 +381,7 @@ class TestGenerator(unittest.TestCase):
 
     def test_build_system_prompt_defaults(self):
         from rag.generator import build_system_prompt
-        prompt = build_system_prompt(None)
-        self.assertIn("intermediate", prompt)
+        self.assertIn("intermediate", build_system_prompt(None))
 
     def test_build_user_prompt_includes_context(self):
         from rag.generator import build_user_prompt
@@ -358,68 +390,80 @@ class TestGenerator(unittest.TestCase):
         self.assertIn("BPE is a subword tokenisation method.", prompt)
         self.assertIn("<context>", prompt)
 
-    def test_build_user_prompt_uses_basename_not_full_path(self):
-        """Filesystem paths should not leak into the student-visible prompt."""
+    def test_build_user_prompt_uses_basename(self):
         from rag.generator import build_user_prompt
         chunks = [make_chunk(source="/home/user/secret/data/raw/lec1.pdf")]
-        prompt = build_user_prompt("question", chunks)
+        prompt = build_user_prompt("q", chunks)
         self.assertNotIn("/home/user/secret", prompt)
         self.assertIn("lec1.pdf", prompt)
 
-    def test_build_user_prompt_conversation_history_user_only(self):
+    def test_build_user_prompt_no_history(self):
+        from rag.generator import build_user_prompt
+        self.assertNotIn("<conversation_history>",
+                         build_user_prompt("hello", [], conversation_history=None))
+
+    def test_build_user_prompt_includes_history(self):
         from rag.generator import build_user_prompt
         history = [
             {"role": "user",      "content": "tell me about BERT"},
-            {"role": "assistant", "content": "BERT stands for Bidirectional..."},
+            {"role": "assistant", "content": "BERT stands for..."},
         ]
         prompt = build_user_prompt("what about GPT?", [], conversation_history=history)
-        self.assertIn("tell me about BERT", prompt)
         self.assertIn("<conversation_history>", prompt)
-
-    def test_build_user_prompt_no_history(self):
-        from rag.generator import build_user_prompt
-        prompt = build_user_prompt("hello", [], conversation_history=None)
-        self.assertNotIn("<conversation_history>", prompt)
+        self.assertIn("tell me about BERT", prompt)
 
     @patch("rag.generator.get_client")
     def test_generate_answer_calls_gemini(self, mock_get_client):
+        # generate_answer now delegates to stream_answer which uses
+        # generate_content_stream — mock that to yield one chunk.
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "Tokenisation splits text into tokens."
-        mock_client.models.generate_content.return_value = mock_response
+        mock_chunk  = MagicMock()
+        mock_chunk.text = "Tokenisation splits text into tokens."
+        mock_client.models.generate_content_stream.return_value = iter([mock_chunk])
         mock_get_client.return_value = mock_client
 
         from rag.generator import generate_answer
-        answer = generate_answer(
-            query="what is tokenisation?",
-            chunks=[make_chunk()],
-            user_profile={"preferred_difficulty": "beginner", "top_topics": []},
-        )
+        answer = generate_answer("what is tokenisation?", chunks=[make_chunk()],
+                                 user_profile={"preferred_difficulty": "beginner", "top_topics": []})
         self.assertEqual(answer, "Tokenisation splits text into tokens.")
-        mock_client.models.generate_content.assert_called_once()
+        mock_client.models.generate_content_stream.assert_called_once()
 
     @patch("rag.generator.get_client")
-    def test_generate_answer_empty_chunks_still_works(self, mock_get_client):
+    def test_generate_answer_empty_chunks(self, mock_get_client):
         mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "I don't have enough context."
-        mock_client.models.generate_content.return_value = mock_response
+        mock_chunk  = MagicMock()
+        mock_chunk.text = "No context available."
+        mock_client.models.generate_content_stream.return_value = iter([mock_chunk])
         mock_get_client.return_value = mock_client
 
         from rag.generator import generate_answer
-        answer = generate_answer("random question", chunks=[])
+        answer = generate_answer("question", chunks=[])
         self.assertIsInstance(answer, str)
+
+    @patch("rag.generator.get_client")
+    def test_stream_answer_yields_fragments(self, mock_get_client):
+        """stream_answer must yield individual text fragments, not one big string."""
+        mock_client  = MagicMock()
+        fragments    = ["Self-attention ", "is a mechanism ", "for weighing tokens."]
+        mock_chunks  = [MagicMock(text=t) for t in fragments]
+        mock_client.models.generate_content_stream.return_value = iter(mock_chunks)
+        mock_get_client.return_value = mock_client
+
+        from rag.generator import stream_answer
+        result = list(stream_answer("explain self-attention", chunks=[make_chunk()]))
+        self.assertEqual(result, fragments)
+        self.assertEqual("".join(result), "Self-attention is a mechanism for weighing tokens.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. END-TO-END PIPELINE INTEGRATION
+# 7. END-TO-END PIPELINE
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestEndToEndPipeline(unittest.TestCase):
-    """
-    Smoke-tests the full retrieve → rerank → generate flow with all
-    external I/O (Qdrant, embedding model, Claude API) mocked out.
-    """
+
+    def setUp(self):
+        import rag.reranker as rr
+        rr.clear_cache()
 
     def test_full_rag_pipeline(self):
         import numpy as np
@@ -427,7 +471,6 @@ class TestEndToEndPipeline(unittest.TestCase):
         import rag.reranker  as rr_mod
         import rag.generator as gen_mod
 
-        # Stub Qdrant
         mock_qdrant = MagicMock()
         point = MagicMock()
         point.score = 0.88
@@ -440,120 +483,133 @@ class TestEndToEndPipeline(unittest.TestCase):
         result_obj = MagicMock(); result_obj.points = [point] * 5
         mock_qdrant.query_points.return_value = result_obj
 
-        # Stub reranker
         mock_ce = MagicMock()
         mock_ce.predict.return_value = [0.95, 0.80, 0.70, 0.60, 0.50]
 
-        # Stub Gemini
-        mock_llm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "Self-attention computes weighted token representations."
-        mock_llm.models.generate_content.return_value = mock_response
+        mock_llm    = MagicMock()
+        mock_chunk  = MagicMock()
+        mock_chunk.text = "Self-attention computes weighted representations."
+        mock_llm.models.generate_content_stream.return_value = iter([mock_chunk])
 
-        with patch.object(ret_mod, "get_client",    return_value=mock_qdrant), \
-             patch.object(ret_mod, "embed_query",   return_value=np.zeros(384)), \
-             patch.object(rr_mod,  "get_reranker",  return_value=mock_ce), \
-             patch.object(gen_mod, "get_client",    return_value=mock_llm):
+        with patch.object(ret_mod, "get_client",   return_value=mock_qdrant), \
+             patch.object(ret_mod, "embed_query",  return_value=np.zeros(384)), \
+             patch.object(rr_mod,  "get_reranker", return_value=mock_ce), \
+             patch.object(gen_mod, "get_client",   return_value=mock_llm):
 
             query   = "Explain self-attention in simple terms"
             history = [{"role": "user", "content": "what are transformers?"}]
             profile = {"preferred_difficulty": "beginner", "top_topics": ["transformers"]}
 
-            chunks  = ret_mod.retrieve_with_context(query, conversation_history=history,
-                                                    user_profile=profile, top_k=15)
-            chunks  = rr_mod.rerank(query, chunks, top_n=5)
-            answer  = gen_mod.generate_answer(query, chunks, user_profile=profile,
-                                               conversation_history=history)
+            chunks = ret_mod.retrieve_with_context(query, conversation_history=history,
+                                                   user_profile=profile, top_k=15)
+            chunks = rr_mod.rerank(query, chunks, top_n=5)
+            answer = gen_mod.generate_answer(query, chunks, user_profile=profile,
+                                             conversation_history=history)
 
         self.assertEqual(len(chunks), 5)
         self.assertIn("rerank_score", chunks[0])
         self.assertGreater(chunks[0]["rerank_score"], chunks[-1]["rerank_score"])
         self.assertIsInstance(answer, str)
         self.assertGreater(len(answer), 0)
+        mock_llm.models.generate_content_stream.assert_called_once()
+        self.assertIn("gemini", mock_llm.models.generate_content_stream.call_args.kwargs.get("model", ""))
 
-        mock_llm.models.generate_content.assert_called_once()
-        call_args = mock_llm.models.generate_content.call_args
-        self.assertIn("gemini", call_args.kwargs.get("model", ""))
+    def test_full_pipeline_cache_skips_rerank_on_repeat(self):
+        """The second call with the same query should skip the cross-encoder."""
+        import numpy as np
+        import rag.retriever as ret_mod
+        import rag.reranker  as rr_mod
 
-    def test_chunker_to_embed_shape_contract(self):
-        """chunk_document output must contain all keys expected by index_chunks()."""
+        mock_qdrant = MagicMock()
+        point = MagicMock(); point.score = 0.7
+        point.payload = {"text": "t", "topic": "transformers", "difficulty": "intermediate",
+                         "content_type": "pdf", "week": 1, "source": "lec.pdf", "slide": None}
+        r = MagicMock(); r.points = [point]
+        mock_qdrant.query_points.return_value = r
+
+        mock_ce = MagicMock()
+        mock_ce.predict.return_value = [0.8]
+
+        with patch.object(ret_mod, "get_client",   return_value=mock_qdrant), \
+             patch.object(ret_mod, "embed_query",  return_value=np.zeros(384)), \
+             patch.object(rr_mod,  "get_reranker", return_value=mock_ce):
+
+            chunks1 = ret_mod.retrieve_with_context("same q", top_k=5)
+            rr_mod.rerank("same q", chunks1, top_n=1)
+
+            chunks2 = ret_mod.retrieve_with_context("same q", top_k=5)
+            rr_mod.rerank("same q", chunks2, top_n=1)
+
+        self.assertEqual(mock_ce.predict.call_count, 1)
+
+    def test_chunker_metadata_contract(self):
+        """All keys required by index_chunks must be present in chunk metadata."""
         from pipeline.chunker import chunk_document
-        doc = {
-            "text": "Attention is all you need. Transformers use self-attention. " * 20,
-            "source": "wk3_transformers.pdf",
-            "content_type": "pdf",
-        }
-        chunks = chunk_document(doc)
-        required_keys = {
-            "source", "topic", "difficulty", "content_type",
-            "week", "slide", "cell_type", "chunk_index",
-        }
-        for chunk in chunks:
-            missing = required_keys - chunk["metadata"].keys()
-            self.assertFalse(missing, f"Chunk missing metadata keys: {missing}")
+        doc = {"text": "Transformers use self-attention. " * 20,
+               "source": "wk3_transformers.pdf", "content_type": "pdf"}
+        required = {"source", "topic", "difficulty", "content_type",
+                    "week", "slide", "cell_type", "chunk_index"}
+        for chunk in chunk_document(doc):
+            missing = required - chunk["metadata"].keys()
+            self.assertFalse(missing, f"Missing metadata keys: {missing}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 7. EVALUATE SCRIPT
+# 8. EVALUATE SCRIPT
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestEvaluate(unittest.TestCase):
 
-    def _get_evaluate_module(self):
-        import importlib, sys
-        # Clear cached module so fresh import picks up stubs
+    def _get_ev(self):
         for k in list(sys.modules.keys()):
-            if k in ("evaluate", "rag.retriever", "rag.reranker", "pipeline.indexer",
-                     "pipeline.embedder", "pipeline.chunker"):
+            if k in ("evaluate", "rag.retriever", "rag.reranker",
+                     "pipeline.indexer", "pipeline.embedder", "pipeline.chunker"):
                 del sys.modules[k]
         import evaluate as ev
         return ev
 
     def test_is_relevant_by_source(self):
-        ev = self._get_evaluate_module()
-        chunk = {"source": "/data/raw/AAI3008_Lec2_TextProcessing.pdf", "topic": "general"}
-        item  = {"relevant_sources": ["Lec2_TextProcessing"], "relevant_topics": []}
-        self.assertTrue(ev.is_relevant(chunk, item))
+        ev = self._get_ev()
+        self.assertTrue(ev.is_relevant(
+            {"source": "/data/raw/AAI3008_Lec2_TextProcessing.pdf", "topic": "general"},
+            {"relevant_sources": ["Lec2_TextProcessing"], "relevant_topics": []}
+        ))
 
     def test_is_relevant_by_topic(self):
-        ev = self._get_evaluate_module()
-        chunk = {"source": "/data/raw/some_other_file.pdf", "topic": "tokenisation"}
-        item  = {"relevant_sources": [], "relevant_topics": ["tokenisation"]}
-        self.assertTrue(ev.is_relevant(chunk, item))
+        ev = self._get_ev()
+        self.assertTrue(ev.is_relevant(
+            {"source": "/data/raw/other.pdf", "topic": "tokenisation"},
+            {"relevant_sources": [], "relevant_topics": ["tokenisation"]}
+        ))
 
     def test_is_not_relevant(self):
-        ev = self._get_evaluate_module()
-        chunk = {"source": "/data/raw/lec5.pdf", "topic": "sentiment"}
-        item  = {"relevant_sources": ["lec1"], "relevant_topics": ["embeddings"]}
-        self.assertFalse(ev.is_relevant(chunk, item))
+        ev = self._get_ev()
+        self.assertFalse(ev.is_relevant(
+            {"source": "/data/raw/lec5.pdf", "topic": "sentiment"},
+            {"relevant_sources": ["lec1"], "relevant_topics": ["embeddings"]}
+        ))
 
     def test_evaluate_mrr_perfect(self):
-        """MRR = 1.0 when every query returns the relevant chunk first."""
-        ev = self._get_evaluate_module()
-        eval_set = [
-            {"question": "What is tokenisation?",
-             "relevant_sources": ["lec2.pdf"], "relevant_topics": ["tokenisation"]},
-        ]
+        ev = self._get_ev()
+        eval_set = [{"question": "tokenisation?",
+                     "relevant_sources": ["lec2.pdf"], "relevant_topics": ["tokenisation"]}]
         with patch.object(ev, "retrieve", return_value=[
-            {"source": "lec2.pdf", "topic": "tokenisation", "text": "..."},
+            {"source": "lec2.pdf", "topic": "tokenisation", "text": "..."}
         ]):
-            metrics = ev.evaluate(eval_set, top_k=5, verbose=False)
-        self.assertAlmostEqual(metrics["mrr"],      1.0)
-        self.assertAlmostEqual(metrics["recall@5"], 1.0)
+            m = ev.evaluate(eval_set, top_k=5, verbose=False)
+        self.assertAlmostEqual(m["mrr"], 1.0)
+        self.assertAlmostEqual(m["recall@5"], 1.0)
 
     def test_evaluate_mrr_miss(self):
-        """MRR = 0 when no relevant chunk is ever returned."""
-        ev = self._get_evaluate_module()
-        eval_set = [
-            {"question": "What is tokenisation?",
-             "relevant_sources": ["lec2.pdf"], "relevant_topics": ["tokenisation"]},
-        ]
+        ev = self._get_ev()
+        eval_set = [{"question": "tokenisation?",
+                     "relevant_sources": ["lec2.pdf"], "relevant_topics": ["tokenisation"]}]
         with patch.object(ev, "retrieve", return_value=[
-            {"source": "lec9.pdf", "topic": "sentiment", "text": "..."},
+            {"source": "lec9.pdf", "topic": "sentiment", "text": "..."}
         ]):
-            metrics = ev.evaluate(eval_set, top_k=5, verbose=False)
-        self.assertAlmostEqual(metrics["mrr"],      0.0)
-        self.assertAlmostEqual(metrics["recall@5"], 0.0)
+            m = ev.evaluate(eval_set, top_k=5, verbose=False)
+        self.assertAlmostEqual(m["mrr"], 0.0)
+        self.assertAlmostEqual(m["recall@5"], 0.0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

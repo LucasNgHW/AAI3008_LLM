@@ -1,24 +1,34 @@
 """
 rag/reranker.py
 ---------------
-Cross-encoder reranker that performs a second-pass scoring of first-stage
-retrieved chunks using full query-passage attention.
+Cross-encoder reranker with LRU result cache to eliminate redundant forward
+passes on repeated queries.
 
-Model: cross-encoder/ms-marco-MiniLM-L-6-v2
-  - Trained on MS MARCO passage ranking
-  - Takes (query, passage) pairs and outputs a relevance logit
-  - More accurate than bi-encoder similarity; ~3–5× slower on CPU
+Performance budget
+------------------
+Without cache : ~600 ms per call on CPU (15 query-passage pairs, 6-layer MiniLM)
+With cache    : ~0 ms on repeated identical queries within the same session
 
-Typical usage:
-    chunks   = retriever.retrieve(query, top_k=20)      # over-retrieve
-    reranked = reranker.rerank(query, chunks, top_n=5)  # prune to top 5
+Cache design
+------------
+- Key   : (query_text, tuple(chunk["text"] for chunk in chunks), top_n)
+- Value : list of reranked chunk dicts (copies, so callers cannot mutate cache)
+- Size  : 128 entries (covers a full conversation session; ~10 MB max)
+- Scope : process-level singleton — shared across Streamlit reruns in the same
+          worker process
 
-Latency note: ~600 ms/query on CPU with the 6-layer MiniLM model.
+Warmup
+------
+Call `warmup()` at app startup to load the CrossEncoder weights before the
+first user query.  Load time is ~2-3 s cold; negligible once warm.
 """
 
+import hashlib
+from functools import lru_cache
 from sentence_transformers.cross_encoder import CrossEncoder
 
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_CACHE_SIZE    = 128   # LRU slots
 
 _reranker: CrossEncoder | None = None
 
@@ -31,12 +41,61 @@ def get_reranker() -> CrossEncoder:
     return _reranker
 
 
+def warmup() -> None:
+    """
+    Load the CrossEncoder and run one dummy prediction so the first real
+    query does not pay the cold-start penalty.  Call once at app startup.
+    """
+    re = get_reranker()
+    re.predict([("warmup query", "warmup passage")])
+    print(f"Reranker warm ({RERANKER_MODEL})")
+
+
+# ── Cache helpers ──────────────────────────────────────────────────────────────
+
+def _cache_key(query: str, chunks: list[dict], top_n: int) -> tuple:
+    """Build a hashable cache key from the rerank inputs."""
+    texts = tuple(c.get("text", "") for c in chunks)
+    return (query, texts, top_n)
+
+
+# We use a module-level dict instead of functools.lru_cache so we can store
+# arbitrary objects (lists of dicts) and inspect/clear the cache if needed.
+_cache: dict[tuple, list[dict]] = {}
+_cache_order: list[tuple] = []   # insertion-order queue for LRU eviction
+
+
+def _cache_get(key: tuple) -> list[dict] | None:
+    return _cache.get(key)
+
+
+def _cache_put(key: tuple, value: list[dict]) -> None:
+    if key in _cache:
+        _cache_order.remove(key)
+    elif len(_cache) >= _CACHE_SIZE:
+        oldest = _cache_order.pop(0)
+        del _cache[oldest]
+    _cache[key] = value
+    _cache_order.append(key)
+
+
+def clear_cache() -> None:
+    """Empty the rerank cache (useful between eval runs)."""
+    _cache.clear()
+    _cache_order.clear()
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
 def rerank(query: str, chunks: list[dict], top_n: int = 5) -> list[dict]:
     """
     Re-score retrieved chunks with the cross-encoder and return the top_n.
 
+    Results are cached by (query, chunk texts, top_n).  On a cache hit the
+    forward pass is skipped entirely (~0 ms).
+
     The input list is NOT mutated; each returned dict is a shallow copy with
-    a new "rerank_score" key added alongside the original "score".
+    a new "rerank_score" key alongside the original "score".
 
     Args:
         query:   The student's original question (not the augmented query).
@@ -49,11 +108,16 @@ def rerank(query: str, chunks: list[dict], top_n: int = 5) -> list[dict]:
     if not chunks:
         return []
 
+    key    = _cache_key(query, chunks, top_n)
+    cached = _cache_get(key)
+    if cached is not None:
+        # Return copies so callers cannot accidentally mutate cached state
+        return [dict(c) for c in cached]
+
     reranker = get_reranker()
     pairs    = [(query, chunk["text"]) for chunk in chunks]
-    scores   = reranker.predict(pairs)   # numpy array of floats
+    scores   = reranker.predict(pairs)
 
-    # Build copies so we never mutate the caller's list
     scored = []
     for chunk, score in zip(chunks, scores):
         entry = dict(chunk)
@@ -61,4 +125,7 @@ def rerank(query: str, chunks: list[dict], top_n: int = 5) -> list[dict]:
         scored.append(entry)
 
     scored.sort(key=lambda c: c["rerank_score"], reverse=True)
-    return scored[:top_n]
+    result = scored[:top_n]
+
+    _cache_put(key, result)
+    return [dict(c) for c in result]

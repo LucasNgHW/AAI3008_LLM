@@ -1,10 +1,17 @@
 """
 pipeline/embedder.py
 --------------------
-Generates dense vector embeddings for text chunks using
-sentence-transformers/all-MiniLM-L6-v2 (384-dimensional, local, no API cost).
+Generates dense vector embeddings using sentence-transformers/all-MiniLM-L6-v2
+(384-dimensional, local, no API cost).
 
-The model is loaded once at module level and reused across calls.
+Performance notes
+-----------------
+The model singleton is loaded once and reused.  Call `warmup()` at application
+start (ingest.py and ui.py both do this) so the ~1-2 s model-load cost is paid
+upfront rather than on the first real query.
+
+embed_query() is the hot path: ~5 ms on CPU once warm.  batch_size=1 skips
+padding overhead for single-query calls; show_progress_bar=False removes tqdm.
 """
 
 from sentence_transformers import SentenceTransformer
@@ -12,7 +19,6 @@ import numpy as np
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Load once; reused for both indexing and query-time encoding
 _model: SentenceTransformer | None = None
 
 
@@ -24,44 +30,52 @@ def get_model() -> SentenceTransformer:
     return _model
 
 
-def embed_texts(texts: list[str], batch_size: int = 64, show_progress: bool = True) -> np.ndarray:
+def warmup() -> None:
     """
-    Encode a list of strings into L2-normalised 384-dim embeddings.
-
-    Args:
-        texts:         Strings to encode.
-        batch_size:    Sentences processed per forward pass.
-        show_progress: Print tqdm progress bar.
-
-    Returns:
-        np.ndarray of shape (len(texts), 384).
+    Load the model and run one dummy encode so the first real query
+    does not pay the cold-start penalty.  Call once at app startup.
     """
     model = get_model()
-    embeddings = model.encode(
+    model.encode(["warmup"], show_progress_bar=False, convert_to_numpy=True)
+    print(f"Embedding model warm ({MODEL_NAME})")
+
+
+def embed_texts(
+    texts: list[str],
+    batch_size: int = 64,
+    show_progress: bool = True,
+) -> np.ndarray:
+    """
+    Encode a list of strings into L2-normalised 384-dim embeddings.
+    Returns np.ndarray of shape (len(texts), 384).
+    """
+    model = get_model()
+    return model.encode(
         texts,
         batch_size=batch_size,
         show_progress_bar=show_progress,
-        normalize_embeddings=True,  # cosine sim == dot product after L2 norm
+        normalize_embeddings=True,
         convert_to_numpy=True,
     )
-    return embeddings
 
 
 def embed_query(query: str) -> np.ndarray:
-    """Encode a single query string. Returns shape (384,)."""
-    return embed_texts([query], show_progress=False)[0]
+    """
+    Encode a single query string.  Returns shape (384,).
+    batch_size=1 skips padding; show_progress_bar=False removes tqdm overhead.
+    """
+    model = get_model()
+    return model.encode(
+        [query],
+        batch_size=1,
+        show_progress_bar=False,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+    )[0]
 
 
 def embed_chunks(chunks: list[dict], **kwargs) -> list[dict]:
-    """
-    Add an 'embedding' key to each chunk dict in-place.
-
-    Args:
-        chunks: Output from chunker.chunk_documents().
-
-    Returns:
-        Same list with 'embedding' added to each dict.
-    """
+    """Add an embedding key to each chunk dict in-place."""
     texts = [c["text"] for c in chunks]
     print(f"Embedding {len(texts)} chunks...")
     embeddings = embed_texts(texts, **kwargs)
