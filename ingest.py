@@ -14,6 +14,7 @@ Usage:
     python ingest.py                        # full ingest from ./data/raw
     python ingest.py --dir path/to/files    # custom directory
     python ingest.py --recreate             # drop and rebuild the collection
+    python ingest.py --from-db              # ingest PDFs stored in SQLite
 """
 
 import argparse
@@ -23,6 +24,7 @@ from pipeline.parsers  import parse_directory
 from pipeline.chunker  import chunk_documents
 from pipeline.embedder import embed_chunks, warmup as embed_warmup
 from pipeline.indexer  import setup_collection, index_chunks, collection_info
+from pipeline.material_ingestion import ingest_all_materials
 
 
 def run_ingestion(data_dir: str = "./data/raw", recreate: bool = False) -> None:
@@ -63,10 +65,32 @@ def run_ingestion(data_dir: str = "./data/raw", recreate: bool = False) -> None:
     print(f"{'='*60}\n")
 
 
+def run_db_ingestion(recreate: bool = False) -> None:
+    start = time.time()
+    print(f"\n{'='*60}")
+    print("NLP Assistant — Database Material Ingestion")
+    print(f"{'='*60}\n")
+
+    chunks_indexed = ingest_all_materials(recreate=recreate)
+    embed_warmup()
+
+    info = collection_info()
+    elapsed = round(time.time() - start, 1)
+    print(f"\n{'='*60}")
+    print(f"Database ingestion complete in {elapsed}s")
+    print(f"Chunks indexed: {chunks_indexed}")
+    print(f"Collection '{info['name']}': {info['vectors_count']} vectors indexed")
+    print(f"{'='*60}\n")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the NLP Assistant ingestion pipeline.")
     parser.add_argument("--dir",      default="./data/raw", help="Directory of raw course files")
     parser.add_argument("--recreate", action="store_true",  help="Drop and recreate the collection")
+    parser.add_argument("--from-db",  action="store_true",  help="Ingest PDFs stored in the SQLite materials database")
     args = parser.parse_args()
 
-    run_ingestion(data_dir=args.dir, recreate=args.recreate)
+    if args.from_db:
+        run_db_ingestion(recreate=args.recreate)
+    else:
+        run_ingestion(data_dir=args.dir, recreate=args.recreate)

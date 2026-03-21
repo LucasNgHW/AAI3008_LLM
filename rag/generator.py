@@ -103,11 +103,15 @@ def build_user_prompt(
     """
     context_blocks = []
     for i, chunk in enumerate(chunks, start=1):
-        source_name = Path(chunk.get("source") or "unknown").name
+        raw_source = chunk.get("source") or "unknown"
+        if isinstance(raw_source, str) and raw_source.startswith("db://materials/"):
+            source_name = raw_source.rsplit("/", 1)[-1]
+        else:
+            source_name = Path(raw_source).name
         meta = (
             f"[{chunk.get('topic', 'general')} | "
             f"{chunk.get('difficulty', '?')} | "
-            f"{source_name}]"
+            f"Course PDF: {source_name}]"
         )
         text = chunk["text"][:MAX_CHUNK_CHARS]  # cap to stay within token budget
         context_blocks.append(f"[{i}] {meta}\n{text}")

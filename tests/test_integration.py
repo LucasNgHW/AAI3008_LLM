@@ -613,6 +613,64 @@ class TestEvaluate(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 9. MATERIAL DELETE FLOW
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestMaterialDeletion(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def test_delete_material_everywhere_deletes_qdrant_and_sqlite(self):
+        import storage.materials_db as mdb
+        import pipeline.material_ingestion as mi
+
+        db_path = Path(self.tmpdir) / "materials.db"
+        with patch.object(mdb, "DB_PATH", db_path):
+            material_id = mdb.store_material("lec_delete.pdf", b"pdf-bytes")
+            mi.get_material = mdb.get_material
+            mi.delete_material = mdb.delete_material
+
+            with patch.object(mi, "delete_material_chunks") as mock_delete_chunks:
+                deleted = mi.delete_material_everywhere(material_id)
+
+            remaining = mdb.get_material(material_id)
+
+        self.assertTrue(deleted)
+        self.assertIsNone(remaining)
+        mock_delete_chunks.assert_called_once_with(
+            material_id,
+            source_label=f"db://materials/{material_id}/lec_delete.pdf",
+        )
+
+    def test_delete_all_materials_everywhere_clears_sqlite_and_qdrant(self):
+        import storage.materials_db as mdb
+        import pipeline.material_ingestion as mi
+
+        db_path = Path(self.tmpdir) / "materials.db"
+        with patch.object(mdb, "DB_PATH", db_path):
+            mdb.store_material("lec1.pdf", b"a")
+            mdb.store_material("lec2.pdf", b"b")
+            mi.delete_all_materials = mdb.delete_all_materials
+
+            mock_client = MagicMock()
+            collections = MagicMock()
+            collections.collections = [MagicMock(name="other"), MagicMock(name="nlp_course")]
+            collections.collections[0].name = "other"
+            collections.collections[1].name = "nlp_course"
+            mock_client.get_collections.return_value = collections
+
+            with patch.object(mi, "get_client", return_value=mock_client):
+                deleted_count = mi.delete_all_materials_everywhere()
+
+            remaining = mdb.count_materials()
+
+        self.assertEqual(deleted_count, 2)
+        self.assertEqual(remaining, 0)
+        mock_client.delete_collection.assert_called_once_with("nlp_course")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     loader = unittest.TestLoader()

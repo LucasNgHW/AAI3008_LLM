@@ -7,6 +7,7 @@ Supports optional metadata filters:
   - topic_filter:      e.g. "transformers", "tokenisation"
   - difficulty_filter: "beginner" | "intermediate" | "advanced"
   - week_filter:       int, e.g. 3
+  - source_filter:     exact source label stored in Qdrant
 
 Results are returned as a list of flat dicts with text, score, and all payload fields.
 
@@ -36,6 +37,7 @@ def retrieve(
     topic_filter: str | None = None,
     difficulty_filter: str | None = None,
     week_filter: int | None = None,
+    source_filter: str | None = None,
     score_threshold: float | None = None,
 ) -> list[dict]:
     """
@@ -47,6 +49,7 @@ def retrieve(
         topic_filter:      Restrict to a specific topic label.
         difficulty_filter: Restrict to a specific difficulty level.
         week_filter:       Restrict to content from a specific week number.
+        source_filter:     Restrict to a specific stored source label.
         score_threshold:   Minimum cosine similarity (0–1). None = no threshold.
 
     Returns:
@@ -64,6 +67,8 @@ def retrieve(
         conditions.append(FieldCondition(key="difficulty", match=MatchValue(value=difficulty_filter)))
     if week_filter is not None:
         conditions.append(FieldCondition(key="week",       match=MatchValue(value=week_filter)))
+    if source_filter:
+        conditions.append(FieldCondition(key="source",     match=MatchValue(value=source_filter)))
 
     qdrant_filter = Filter(must=conditions) if conditions else None
 

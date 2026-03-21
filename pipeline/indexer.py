@@ -15,6 +15,9 @@ with QdrantClient(url="https://...", api_key="...").
 import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
+    Filter,
+    FieldCondition,
+    MatchValue,
     Distance,
     VectorParams,
     PointStruct,
@@ -24,6 +27,9 @@ from qdrant_client.models import (
 COLLECTION_NAME = "nlp_course"
 VECTOR_DIM      = 384
 STORAGE_PATH    = "./qdrant_storage"
+
+KEYWORD_SCHEMA = getattr(PayloadSchemaType, "KEYWORD", "keyword")
+INTEGER_SCHEMA = getattr(PayloadSchemaType, "INTEGER", "integer")
 
 _client: QdrantClient | None = None
 
@@ -55,17 +61,23 @@ def setup_collection(recreate: bool = False) -> None:
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
         )
-        # Create payload indices to speed up filtered search
-        for field, schema in [
-            ("topic",        PayloadSchemaType.KEYWORD),
-            ("difficulty",   PayloadSchemaType.KEYWORD),
-            ("content_type", PayloadSchemaType.KEYWORD),
-            ("week",         PayloadSchemaType.INTEGER),
-        ]:
-            client.create_payload_index(COLLECTION_NAME, field, schema)
         print(f"Created collection: {COLLECTION_NAME}")
     else:
         print(f"Collection already exists: {COLLECTION_NAME}")
+
+    # Local Qdrant ignores payload indexes, but server Qdrant benefits from them.
+    for field, schema in [
+        ("topic", KEYWORD_SCHEMA),
+        ("difficulty", KEYWORD_SCHEMA),
+        ("content_type", KEYWORD_SCHEMA),
+        ("week", INTEGER_SCHEMA),
+        ("material_id", INTEGER_SCHEMA),
+        ("source", KEYWORD_SCHEMA),
+    ]:
+        try:
+            client.create_payload_index(COLLECTION_NAME, field, schema)
+        except Exception:
+            pass
 
 
 def index_chunks(chunks: list[dict], batch_size: int = 256) -> None:
@@ -95,6 +107,7 @@ def index_chunks(chunks: list[dict], batch_size: int = 256) -> None:
             "slide":        chunk["metadata"].get("slide"),
             "cell_type":    chunk["metadata"].get("cell_type"),
             "chunk_index":  chunk["metadata"].get("chunk_index"),
+            "material_id":  chunk["metadata"].get("material_id"),
         }
         points.append(PointStruct(
             id=str(uuid.uuid4()),
@@ -124,3 +137,30 @@ def collection_info() -> dict:
         "vectors_count": vectors_count if vectors_count is not None else points_count,
         "status": getattr(info, "status", None),
     }
+
+
+def delete_material_chunks(material_id: int, source_label: str | None = None) -> None:
+    """
+    Delete Qdrant points for one material.
+
+    We match both `material_id` and `source` so this works for newly indexed
+    chunks and also older DB-ingested chunks that only carried the source label.
+    """
+    client = get_client()
+    should_conditions = [FieldCondition(key="material_id", match=MatchValue(value=material_id))]
+    if source_label:
+        should_conditions.append(FieldCondition(key="source", match=MatchValue(value=source_label)))
+
+    try:
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(should=should_conditions),
+        )
+    except Exception:
+        try:
+            client.delete(
+                collection_name=COLLECTION_NAME,
+                filter=Filter(should=should_conditions),
+            )
+        except Exception:
+            pass
