@@ -26,6 +26,7 @@ Run with:
 """
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -253,25 +254,27 @@ if count_materials() == 0:
 
 def render_sources(sources: list[dict]) -> None:
     with st.expander("📄 Retrieved sources", expanded=False):
-        if timings:
-            st.caption(f"⏱ Retrieve: {timings.get('retrieve', 0):.2f}s | Rerank: {timings.get('rerank', 0):.2f}s | Generate: {timings.get('generate', 0):.2f}s")
         for i, src in enumerate(sources, start=1):
             score_val = src.get("rerank_score", src.get("score", "?"))
             score_str = f"{score_val:.3f}" if isinstance(score_val, float) else str(score_val)
+
             st.markdown(
                 f"**[{i}]** `{src.get('difficulty', '?')}` | "
                 f"score: `{score_str}` | "
                 f"*{build_source_label(src.get('source'))}*"
             )
-            preview = src["text"][:300] + ("…" if len(src["text"]) > 300 else "")
+
+            preview = src.get("text", "")
+            preview = preview[:300] + ("…" if len(preview) > 300 else "")
             st.caption(preview)
 
 
 def render_timings(timings: dict) -> None:
-    total = sum(timings.values())
-    parts = [f"**{k}:** {v*1000:.0f} ms" for k, v in timings.items()]
-    parts.append(f"**total:** {total*1000:.0f} ms")
-    st.caption("  ·  ".join(parts))
+    if timings:
+        total = sum(timings.values())
+        parts = [f"**{k}:** {v*1000:.0f} ms" for k, v in timings.items()]
+        parts.append(f"**total:** {total*1000:.0f} ms")
+        st.caption(" · ".join(parts))
 
 # Welcome message when chat is empty
 if not st.session_state.messages:
@@ -345,6 +348,12 @@ if query := st.chat_input("Ask about your course material..."):
                 conversation_history=st.session_state.messages[:-1],
             )
         )
+
+        if isinstance(answer, str):
+            answer = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", answer)
+            answer = re.sub(r"\s+([.,;:!?])", r"\1", answer)
+            answer = re.sub(r" {2,}", " ", answer)
+
         timings["generate"] = time.perf_counter() - t0
 
         # Rating buttons

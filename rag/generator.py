@@ -93,16 +93,12 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
         "",
         "Writing guidelines:",
         f"  - Depth: {depth_guide}",
-        "  - Style: answer in a clear, student-friendly way.",
-        "  - Clarity: use short paragraphs and simple wording appropriate to the student's level.",
-        "  - Conciseness: keep the answer concise unless the user asks for more detail.",
-        "  - Structure: start with a direct 1-2 sentence answer, then explain only the key points needed.",
-        "  - Grounding: base the answer only on the retrieved course material.",
-        "  - Uncertainty: if the material does not explicitly answer the question, say so clearly.",
         "  - Repetition: do not repeat the same point or restate the question.",
         "  - Avoid repeating definitions after already giving a direct answer.",
         "  - Formatting: use bullet points for comparisons, pros/cons, differences, or lists. For comparison questions, present each item clearly under its own bullet.",
         "  - Summary: when helpful, end with one brief sentence starting with 'In short:'.",
+        "  - Prefer phrasing that stays close to the retrieved course material instead of broad general commentary.",
+        "  - Do not introduce examples, applications, or claims unless they are supported by the retrieved material.",
         "  - Do not include citation markers like [1], [2], or reference numbers in the answer.",
         "  - Do not end with generic sign-off phrases.",
     ]
@@ -133,7 +129,8 @@ def build_user_prompt(
             meta = (
                 # ... your existing meta line unchanged
             )
-            context_blocks.append(f"[{i}] {meta}\n{chunk['text']}")
+            clean_chunk_text = clean_answer_text(chunk["text"])
+            context_blocks.append(f"Source {i}: {meta}\n{clean_chunk_text}")
         context_str = "\n\n".join(context_blocks)
 
     history_str = ""
@@ -214,13 +211,12 @@ def stream_answer(
         err = str(exc)
         if "429" in err or "quota" in err.lower() or "rate" in err.lower():
             yield (
-                "\n\n⚠️ **Gemini free-tier rate limit reached.** "
-                "Wait 60 seconds and try again, or reduce query frequency. "
-                "Upgrading to a paid API key removes this limit."
+                "\n\n⚠️ **Gemini quota limit reached.** "
+                "Please try again later, use a different API key/project, "
+                "or switch to a paid/billed API setup."
             )
         else:
             raise
-
 
 def generate_answer(
     query: str,
@@ -268,5 +264,6 @@ def generate_answer_stream(
     )
 
     for chunk in response:
-        if chunk.text:
-            yield chunk.text
+        text = getattr(chunk, "text", None)
+        if text:
+            yield clean_answer_text(text)

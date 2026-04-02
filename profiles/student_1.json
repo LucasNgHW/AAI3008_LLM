@@ -1,0 +1,19 @@
+{
+  "user_id": "student_1",
+  "query_history": [
+    "tell me about multimodal",
+    "tell me more about multimodel ",
+    "tell me more about multimodal",
+    "tell me about multimodal"
+  ],
+  "topic_counts": {
+    "language_models": 3,
+    "general": 1
+  },
+  "difficulty_scores": [
+    2,
+    2,
+    2,
+    2
+  ]
+}
