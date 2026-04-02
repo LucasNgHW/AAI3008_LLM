@@ -53,16 +53,21 @@
     "what is a transfromer?",
     "what is cbow",
     "who is tan zheng liagn",
-    "what is the gymvision project about"
+    "what is the gymvision project about",
+    "tell me about multimodel",
+    "tell me about multimodal"
   ],
   "topic_counts": {
     "tokenisation": 8,
     "embeddings": 2,
     "transformers": 28,
     "general": 14,
-    "text_classification": 1
+    "text_classification": 1,
+    "language_models": 2
   },
   "difficulty_scores": [
+    2,
+    2,
     2,
     2,
     2,

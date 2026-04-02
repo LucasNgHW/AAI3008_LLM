@@ -1,7 +1,6 @@
 # Core RAG & NLP
 google-genai>=0.7.0
 sentence-transformers>=2.7.0
-langchain-text-splitters>=0.2.0
 
 # Document parsing
 unstructured[pdf]>=0.13.0
@@ -16,3 +15,6 @@ streamlit>=1.35.0
 
 # Utilities
 numpy>=1.26.0
+
+# Testing
+pytest>=8.0.0

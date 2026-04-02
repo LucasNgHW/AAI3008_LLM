@@ -1,6 +1,6 @@
 # NLP Learning Assistant (RAG)
 
-A personalised NLP learning assistant that retrieves relevant course material and generates grounded, difficulty-adapted answers via Claude.
+A personalised NLP learning assistant that retrieves relevant course material and generates grounded, difficulty-adapted answers via Gemini.
 
 ## Project Structure
 
