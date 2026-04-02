@@ -123,7 +123,7 @@ def infer_week(source: str) -> int | None:
 def chunk_document(
     doc: dict,
     week: int | None = None,
-    chunk_size: int = 800,
+    chunk_size: int = 1000,
     chunk_overlap: int = 150,
 ) -> list[dict]:
     """

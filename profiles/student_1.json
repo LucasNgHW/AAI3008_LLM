@@ -71,7 +71,9 @@
     "What is the difference between unified and modular multimodal LLMs?",
     "Explain what multimodal LLMs are in simple terms",
     "Explain what multimodal LLMs are in simple terms",
-    "What is the difference between unified and modular multimodal LLMs?"
+    "What is the difference between unified and modular multimodal LLMs?",
+    "explain multimodel in laymen terms",
+    "what are the pros"
   ],
   "topic_counts": {
     "tokenisation": 9,
@@ -79,9 +81,11 @@
     "transformers": 32,
     "general": 17,
     "text_classification": 1,
-    "language_models": 10
+    "language_models": 12
   },
   "difficulty_scores": [
+    2,
+    2,
     2,
     2,
     2,

@@ -112,17 +112,22 @@ def parse_file(path: str) -> list[dict]:
     ext = Path(path).suffix.lower()
     if ext == ".pdf":
         return parse_pdf(path)
-    elif ext in (".pptx", ".ppt"):
+    elif ext == ".pptx":
         return parse_pptx(path)
+    elif ext == ".ppt":
+        print(f"  WARNING: Legacy .ppt not supported, skipping {path}")
+        return []
     elif ext == ".ipynb":
         return parse_notebook(path)
+    elif ext in (".txt", ".md"):
+        return parse_text(path)
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
 
 def parse_directory(directory: str) -> list[dict]:
     """Recursively parse all supported files in a directory."""
-    supported = {".pdf", ".pptx", ".ppt", ".ipynb"}
+    supported = {".pdf", ".pptx", ".ipynb", ".txt", ".md"}
     all_chunks = []
     for root, _, files in os.walk(directory):
         for fname in files:
@@ -135,3 +140,15 @@ def parse_directory(directory: str) -> list[dict]:
                 except Exception as e:
                     print(f"  WARNING: Failed to parse {fpath}: {e}")
     return all_chunks
+
+def parse_text(path: str) -> list[dict]:
+    """Extract text from plain .txt or .md files."""
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+    if not text:
+        return []
+    return [{
+        "text": text,
+        "source": path,
+        "content_type": "markdown" if path.endswith(".md") else "text",
+    }]

@@ -31,6 +31,7 @@ from typing import Iterator
 from google import genai
 
 MODEL          = "gemini-2.5-flash-lite"    
+MAX_TOKENS   = 2048   
 HISTORY_WINDOW = 3                     # 5 turns was ~2k extra tokens; 3 is enough for context
 MAX_CHUNK_CHARS = 500                  # truncate each chunk to cap prompt size
 MAX_HISTORY_CHARS = 600               # total chars of history injected
@@ -115,25 +116,25 @@ def build_user_prompt(
 ) -> str:
     """
     Build the user-turn message:
-      1. Recent conversation history (all roles, capped to HISTORY_WINDOW)
-      2. Retrieved course material as numbered XML context blocks
-      3. The student's current question
+    1. Recent conversation history (all roles, capped to HISTORY_WINDOW)
+    2. Retrieved course material as numbered XML context blocks
+    3. The student's current question
     """
-    context_blocks = []
-    for i, chunk in enumerate(chunks, start=1):
-        raw_source = chunk.get("source") or "unknown"
-        if isinstance(raw_source, str) and raw_source.startswith("db://materials/"):
-            source_name = raw_source.rsplit("/", 1)[-1]
-        else:
-            source_name = Path(raw_source).name
-        meta = (
-            f"[{chunk.get('topic', 'general')} | "
-            f"{chunk.get('difficulty', '?')} | "
-            f"Course PDF: {source_name}]"
-        )
-        text = chunk["text"][:MAX_CHUNK_CHARS]  # cap to stay within token budget
-        context_blocks.append(f"[{i}] {meta}\n{text}")
-    context_str = "\n\n".join(context_blocks) if context_blocks else "No context retrieved."
+    if not chunks:
+        context_str = "No relevant course material was retrieved for this question."
+    else:
+        context_blocks = []
+        for i, chunk in enumerate(chunks, start=1):
+            raw_source = chunk.get("source") or "unknown"
+            if isinstance(raw_source, str) and raw_source.startswith("db://materials/"):
+                source_name = raw_source.rsplit("/", 1)[-1]
+            else:
+                source_name = Path(raw_source).name
+            meta = (
+                # ... your existing meta line unchanged
+            )
+            context_blocks.append(f"[{i}] {meta}\n{chunk['text']}")
+        context_str = "\n\n".join(context_blocks)
 
     history_str = ""
     if conversation_history:
@@ -241,3 +242,31 @@ def generate_answer(
         The model's response as a plain string.
     """
     return "".join(stream_answer(query, chunks, user_profile, conversation_history))
+
+
+def generate_answer_stream(
+    query: str,
+    chunks: list[dict],
+    user_profile: dict | None = None,
+    conversation_history: list[dict] | None = None,
+) -> Iterator[str]:
+    """
+    Streaming version of generate_answer using Gemini.
+    Yields text chunks as they arrive.
+    Use with st.write_stream() in Streamlit.
+    """
+    client = get_client()
+
+    system_prompt = build_system_prompt(user_profile)
+    user_prompt   = build_user_prompt(query, chunks, conversation_history)
+
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+    response = client.models.generate_content_stream(
+        model=MODEL,
+        contents=full_prompt,
+    )
+
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text

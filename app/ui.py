@@ -37,7 +37,7 @@ if ROOT_DIR not in sys.path:
 import streamlit as st
 from rag.retriever            import retrieve_with_context
 from rag.reranker             import rerank
-from rag.generator            import stream_answer
+from rag.generator            import generate_answer, generate_answer_stream
 from personalisation.user_profile import UserProfile
 from pipeline.material_ingestion import (
     delete_all_materials_everywhere,
@@ -117,7 +117,12 @@ with st.sidebar:
         getattr(st, materials_notice["level"])(materials_notice["message"])
 
     user_id = st.text_input("Your student ID", value="student_1", key="user_id_input")
-    profile = get_profile(user_id)
+
+    @st.cache_resource
+    def load_profile(uid: str) -> UserProfile:
+        return UserProfile(uid)
+
+    profile = load_profile(user_id)
 
     st.subheader("Your Learning Profile")
     st.markdown(f"**Current level:** {profile.preferred_difficulty.capitalize()}")
@@ -198,6 +203,13 @@ with st.sidebar:
     st.divider()
     if st.button("Clear conversation"):
         st.session_state.messages = []
+        st.rerun()
+    if st.button("Reset my learning profile"):
+        profile_path = f"./profiles/{user_id}.json"
+        if os.path.exists(profile_path):
+            os.remove(profile_path)
+        st.cache_resource.clear()
+        st.success("Profile reset.")
         st.rerun()
 
 # ── Session state ──────────────────────────────────────────────────────────────
@@ -306,23 +318,22 @@ if query := st.chat_input("Ask about your course material..."):
                 chunks = rerank(query, chunks, top_n=5)
                 timings["rerank"] = time.perf_counter() - t0
 
+            best_score = chunks[0].get("rerank_score", chunks[0].get("score", 0)) if chunks else 0
+            if not chunks:
+                st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
+                st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
+                st.rerun()
+
         # Stage 3: stream generation — renders tokens as they arrive
         t0 = time.perf_counter()
-        try:
-            answer = st.write_stream(
-                stream_answer(
-                    query=query,
-                    chunks=chunks,
-                    user_profile=profile.to_dict(),
-                    conversation_history=st.session_state.messages[:-1],
-                )
+        answer = st.write_stream(
+            generate_answer_stream(
+                query=query,
+                chunks=chunks,
+                user_profile=profile.to_dict(),
+                conversation_history=st.session_state.messages[:-1],
             )
-        except ValueError as e:
-            st.error(str(e))
-            answer = "Unable to generate an answer because the Gemini API key is not configured."
-        except Exception:
-            st.error("Something went wrong while generating the answer.")
-            answer = "Unable to generate an answer due to an unexpected error."
+        )
         timings["generate"] = time.perf_counter() - t0
 
         if chunks:

@@ -75,7 +75,7 @@ def retrieve(
     # Use query_points (qdrant-client ≥1.7); fall back to legacy search if the
     # server/client version only exposes the older API.
     try:
-        result  = client.query_points(
+        result = client.query_points(
             collection_name=COLLECTION_NAME,
             query=qvector,
             limit=top_k,
@@ -85,15 +85,19 @@ def retrieve(
         )
         points = getattr(result, "points", result)
     except Exception:
-        # Older qdrant-client (<1.7) exposes client.search()
-        points = client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=qvector,
-            limit=top_k,
-            query_filter=qdrant_filter,
-            score_threshold=score_threshold,
-            with_payload=True,
-        )
+        # query_points not available, fall back to legacy client.search
+        try:
+            points = client.search(
+                collection_name=COLLECTION_NAME,
+                query_vector=qvector,
+                limit=top_k,
+                query_filter=qdrant_filter,
+                score_threshold=score_threshold,
+                with_payload=True,
+            )
+        except Exception as e:
+            print(f"Qdrant search error: {e}")
+            return []
 
     return [
         {
@@ -140,16 +144,11 @@ def retrieve_with_context(
         Same structure as retrieve().
     """
     augmented_query = query
-
     if conversation_history:
-        # Append only *user* turns — assistant text is verbose and degrades query quality
-        recent_user_texts = [
-            t["content"].strip()
-            for t in conversation_history[-4:]
-            if t.get("role") == "user" and t.get("content", "").strip()
-        ]
-        if recent_user_texts:
-            context_prefix = " ".join(recent_user_texts)[:_HISTORY_QUERY_CHARS]
-            augmented_query = f"{context_prefix} {query}"
+        recent = conversation_history[-3:]
+        context_str = " ".join(
+            turn["content"] for turn in recent if turn.get("content")
+        )
+        augmented_query = f"{context_str} {query}"
 
     return retrieve(augmented_query, top_k=top_k, **filter_kwargs)

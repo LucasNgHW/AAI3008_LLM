@@ -74,11 +74,11 @@ def embed_query(query: str) -> np.ndarray:
     )[0]
 
 
-def embed_chunks(chunks: list[dict], **kwargs) -> list[dict]:
+def embed_chunks(chunks: list[dict], batch_size: int = 64) -> list[dict]:
     """Add an embedding key to each chunk dict in-place."""
     texts = [c["text"] for c in chunks]
     print(f"Embedding {len(texts)} chunks...")
-    embeddings = embed_texts(texts, **kwargs)
+    embeddings = embed_texts(texts, batch_size=batch_size)
     for chunk, emb in zip(chunks, embeddings):
         chunk["embedding"] = emb.tolist()
     print("Embedding complete.")

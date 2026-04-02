@@ -81,6 +81,9 @@ def setup_collection(recreate: bool = False) -> None:
 
 
 def index_chunks(chunks: list[dict], batch_size: int = 256) -> None:
+    if not chunks:
+        print("No chunks to index.")
+        return
     """
     Upsert a list of embedded chunk dicts into Qdrant.
 
@@ -127,16 +130,15 @@ def index_chunks(chunks: list[dict], batch_size: int = 256) -> None:
 def collection_info() -> dict:
     """Return basic stats about the collection."""
     client = get_client()
-    info = client.get_collection(COLLECTION_NAME)
-
-    vectors_count = getattr(info, "vectors_count", None)
-    points_count  = getattr(info, "points_count", None)
-
-    return {
-        "name": COLLECTION_NAME,
-        "vectors_count": vectors_count if vectors_count is not None else points_count,
-        "status": getattr(info, "status", None),
-    }
+    try:
+        info = client.get_collection(COLLECTION_NAME)
+        return {
+            "name":          COLLECTION_NAME,
+            "vectors_count": info.vectors_count,
+            "status":        str(info.status),
+        }
+    except Exception:
+        return {"name": COLLECTION_NAME, "vectors_count": 0, "status": "not found"}
 
 
 def delete_material_chunks(material_id: int, source_label: str | None = None) -> None:
