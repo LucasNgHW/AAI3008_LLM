@@ -125,7 +125,9 @@ with st.sidebar:
     profile = load_profile(user_id)
 
     st.subheader("Your Learning Profile")
-    st.markdown(f"**Current level:** {profile.preferred_difficulty.capitalize()}")
+    difficulty_label = profile.preferred_difficulty.capitalize()
+    colours = {"Beginner": "🟢", "Intermediate": "🟡", "Advanced": "🔴"}
+    st.markdown(f"**Current level:** {colours.get(difficulty_label, '⚪')} {difficulty_label}")
 
     top = profile.top_topics
     st.markdown(f"**Top topics:** {', '.join(top) if top else 'None yet — start asking!'}")
@@ -251,6 +253,8 @@ if count_materials() == 0:
 
 def render_sources(sources: list[dict]) -> None:
     with st.expander("📄 Retrieved sources", expanded=False):
+        if timings:
+            st.caption(f"⏱ Retrieve: {timings.get('retrieve', 0):.2f}s | Rerank: {timings.get('rerank', 0):.2f}s | Generate: {timings.get('generate', 0):.2f}s")
         for i, src in enumerate(sources, start=1):
             score_val = src.get("rerank_score", src.get("score", "?"))
             score_str = f"{score_val:.3f}" if isinstance(score_val, float) else str(score_val)
@@ -269,6 +273,9 @@ def render_timings(timings: dict) -> None:
     parts.append(f"**total:** {total*1000:.0f} ms")
     st.caption("  ·  ".join(parts))
 
+# Welcome message when chat is empty
+if not st.session_state.messages:
+    st.info("👋 Welcome! Ask me anything about your NLP course. Try starting with a topic like *transformers*, *tokenisation*, or *sentiment analysis*.")
 
 # Render history
 for msg in st.session_state.messages:
@@ -301,28 +308,32 @@ if query := st.chat_input("Ask about your course material..."):
 
         # Stage 1: retrieve
         first_stage_k = 15 if use_reranker else 5
-        with st.spinner("Searching course materials…"):
+        progress = st.progress(0, text="Searching course materials…")
+        t0 = time.perf_counter()
+        chunks = retrieve_with_context(
+            query=query,
+            conversation_history=st.session_state.messages[:-1],
+            user_profile=profile.to_dict(),
+            top_k=first_stage_k,
+            **filter_kwargs,
+        )
+        timings["retrieve"] = time.perf_counter() - t0
+
+        # Stage 2: rerank
+        progress.progress(50, text="Reranking results…")
+        if use_reranker and chunks:
             t0 = time.perf_counter()
-            chunks = retrieve_with_context(
-                query=query,
-                conversation_history=st.session_state.messages[:-1],
-                user_profile=profile.to_dict(),
-                top_k=first_stage_k,
-                **filter_kwargs,
-            )
-            timings["retrieve"] = time.perf_counter() - t0
+            chunks = rerank(query, chunks, top_n=5)
+            timings["rerank"] = time.perf_counter() - t0
 
-            # Stage 2: rerank
-            if use_reranker and chunks:
-                t0 = time.perf_counter()
-                chunks = rerank(query, chunks, top_n=5)
-                timings["rerank"] = time.perf_counter() - t0
+        progress.progress(100, text="Generating answer…")
+        progress.empty()
 
-            best_score = chunks[0].get("rerank_score", chunks[0].get("score", 0)) if chunks else 0
-            if not chunks:
-                st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
-                st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
-                st.rerun()
+        best_score = chunks[0].get("rerank_score", chunks[0].get("score", 0)) if chunks else 0
+        if not chunks:
+            st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
+            st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
+            st.rerun()
 
         # Stage 3: stream generation — renders tokens as they arrive
         t0 = time.perf_counter()
@@ -335,6 +346,15 @@ if query := st.chat_input("Ask about your course material..."):
             )
         )
         timings["generate"] = time.perf_counter() - t0
+
+        # Rating buttons
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("👍 Helpful", key=f"up_{len(st.session_state.messages)}"):
+                st.toast("Thanks for the feedback!")
+        with col2:
+            if st.button("👎 Not helpful", key=f"down_{len(st.session_state.messages)}"):
+                st.toast("We'll try to do better!")
 
         if chunks:
             render_sources(chunks)
