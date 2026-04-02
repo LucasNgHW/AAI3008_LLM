@@ -25,6 +25,7 @@ Environment
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Iterator
 from google import genai
@@ -40,9 +41,22 @@ _client: genai.Client | None = None
 def get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = genai.Client()
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "Gemini API key not found. Please set GEMINI_API_KEY before running the app."
+            )
+        _client = genai.Client(api_key=api_key)
     return _client
 
+def clean_answer_text(text: str) -> str:
+    # Remove citation-style markers like [1], [2], [1, 3]
+    text = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", text)
+    # Remove spaces before punctuation
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
+    # Clean repeated spaces
+    text = re.sub(r" {2,}", " ", text)
+    return text
 
 # ── Prompt assembly ────────────────────────────────────────────────────────────
 
@@ -68,8 +82,9 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
 
     lines = [
         "You are a personalised NLP learning assistant for university students.",
-        "Answer questions about Natural Language Processing using the course material "
-        "provided in the <context> block. You may synthesise across multiple chunks.",
+        "Answer questions about Natural Language Processing using only the course material "
+        "provided in the <context> block. You may synthesise across multiple chunks, "
+        "but do not add outside facts unless clearly labeled as general background.",
         "",
         "Student profile:",
         f"  - Current level: {difficulty}",
@@ -77,15 +92,18 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
         "",
         "Writing guidelines:",
         f"  - Depth: {depth_guide}",
-        "  - Structure: open with a direct 1-2 sentence answer, then explain the "
-        "concept fully, then give a concrete example from the course material.",
-        "  - Length: write as much as the topic requires. A good conceptual answer "
-        "is typically 150-400 words — do not truncate early or pad with filler.",
-        "  - Synthesis: if multiple context chunks are relevant, weave them into a "
-        "single coherent explanation rather than addressing each chunk separately.",
-        "  - If the context genuinely lacks the information needed, say so briefly "
-        "— do not speculate or invent facts not present in the material.",
-        "  - Do not repeat the question. Do not end with generic sign-off phrases.",
+        "  - Style: answer in a clear, student-friendly way.",
+        "  - Clarity: use short paragraphs and simple wording appropriate to the student's level.",
+        "  - Conciseness: keep the answer concise unless the user asks for more detail.",
+        "  - Structure: start with a direct 1-2 sentence answer, then explain only the key points needed.",
+        "  - Grounding: base the answer only on the retrieved course material.",
+        "  - Uncertainty: if the material does not explicitly answer the question, say so clearly.",
+        "  - Repetition: do not repeat the same point or restate the question.",
+        "  - Avoid repeating definitions after already giving a direct answer.",
+        "  - Formatting: use bullet points for comparisons, pros/cons, differences, or lists. For comparison questions, present each item clearly under its own bullet.",
+        "  - Summary: when helpful, end with one brief sentence starting with 'In short:'.",
+        "  - Do not include citation markers like [1], [2], or reference numbers in the answer.",
+        "  - Do not end with generic sign-off phrases.",
     ]
     return "\n".join(lines)
 
@@ -190,7 +208,7 @@ def stream_answer(
         ):
             text = getattr(chunk, "text", None)
             if text:
-                yield text
+                yield clean_answer_text(text)
     except Exception as exc:
         err = str(exc)
         if "429" in err or "quota" in err.lower() or "rate" in err.lower():

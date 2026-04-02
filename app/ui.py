@@ -269,7 +269,7 @@ for msg in st.session_state.messages:
                 render_timings(msg["timings"])
 
 # ── Handle new query ───────────────────────────────────────────────────────────
-if query := st.chat_input("Ask about NLP..."):
+if query := st.chat_input("Ask about your course material..."):
 
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
@@ -308,14 +308,21 @@ if query := st.chat_input("Ask about NLP..."):
 
         # Stage 3: stream generation — renders tokens as they arrive
         t0 = time.perf_counter()
-        answer = st.write_stream(
-            stream_answer(
-                query=query,
-                chunks=chunks,
-                user_profile=profile.to_dict(),
-                conversation_history=st.session_state.messages[:-1],
+        try:
+            answer = st.write_stream(
+                stream_answer(
+                    query=query,
+                    chunks=chunks,
+                    user_profile=profile.to_dict(),
+                    conversation_history=st.session_state.messages[:-1],
+                )
             )
-        )
+        except ValueError as e:
+            st.error(str(e))
+            answer = "Unable to generate an answer because the Gemini API key is not configured."
+        except Exception:
+            st.error("Something went wrong while generating the answer.")
+            answer = "Unable to generate an answer due to an unexpected error."
         timings["generate"] = time.perf_counter() - t0
 
         if chunks:
