@@ -349,12 +349,13 @@ if query := st.chat_input("Ask about your course material..."):
     })
 
     if chunks:
+        from pipeline.chunker import infer_difficulty
         top_chunk = chunks[0]
+        from pipeline.chunker import infer_difficulty
         profile.log_interaction(
             query=query,
             topic=top_chunk.get("topic", "general"),
-            difficulty=top_chunk.get("difficulty", "intermediate"),
+            difficulty=infer_difficulty(query),  # ← query-based
         )
-        refresh_profile_cache(user_id)
 
     st.rerun()

@@ -92,7 +92,7 @@ def infer_difficulty(text: str) -> str:
     advanced_count = sum(1 for t in ADVANCED_TERMS if t in text_lower)
     beginner_count = sum(1 for t in BEGINNER_TERMS if t in text_lower)
 
-    if advanced_count >= 3:
+    if advanced_count >= 2:
         return "advanced"
     if advanced_count >= 1:
         return "intermediate"
