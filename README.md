@@ -112,7 +112,7 @@ Or use Conda if preferred.
 ### 2. Install dependencies
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt (Might take a while to download)
 ```
 
 ### 3. Set your Gemini API key
