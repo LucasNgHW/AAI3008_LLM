@@ -1,14 +1,4 @@
-"""
-app/ui.py
----------
-Streamlit chat interface for the NLP Learning Assistant.
-
-This file now acts as the page orchestrator:
-  - page config and startup
-  - sidebar state
-  - first-run upload gate
-  - chat query flow
-"""
+"""Main Streamlit page for the NLP learning assistant."""
 
 import os
 import re
@@ -57,6 +47,34 @@ use_reranker = sidebar_state.use_reranker
 show_timings = sidebar_state.show_timings
 
 
+def _clean_streamed_answer(answer: str) -> str:
+    """Normalise minor formatting artefacts from streamed model output."""
+    answer = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", answer)
+    answer = re.sub(r"\s+([.,;:!?])", r"\1", answer)
+    answer = re.sub(r" {2,}", " ", answer)
+    return answer
+
+
+def _build_filter_kwargs(selected_source: str | None, difficulty: str) -> dict:
+    filter_kwargs: dict = {}
+    if selected_source is not None:
+        filter_kwargs["source_filter"] = selected_source
+    if difficulty != "Any":
+        filter_kwargs["difficulty_filter"] = difficulty
+    return filter_kwargs
+
+
+def _render_no_material_warning() -> None:
+    st.warning(
+        "⚠️ I couldn't find relevant course material for that question. "
+        "Try rephrasing or removing filters."
+    )
+    st.session_state.messages.append(
+        {"role": "assistant", "content": "⚠️ No relevant material found."}
+    )
+    st.rerun()
+
+
 st.title("NLP Learning Assistant")
 st.caption(
     "Ask anything about your NLP course. "
@@ -93,12 +111,8 @@ if query := st.chat_input("Ask about your course material..."):
         profile = get_profile(user_id)
         timings: dict = {}
 
-        filter_kwargs: dict = {}
         selected_source = material_options.get(material_sel)
-        if selected_source is not None:
-            filter_kwargs["source_filter"] = selected_source
-        if diff_sel != "Any":
-            filter_kwargs["difficulty_filter"] = diff_sel
+        filter_kwargs = _build_filter_kwargs(selected_source, diff_sel)
 
         route = route_query(
             query=query,
@@ -133,6 +147,8 @@ if query := st.chat_input("Ask about your course material..."):
 
             retried_query: str | None = None
             if should_retry_retrieval(chunks):
+                # First-pass retrieval can miss when the question is too vague
+                # ("how does it work?"). Retry once with a clearer standalone query.
                 progress.progress(25, text="Retrying with a clarified query…")
                 retried_query = rewrite_query_for_retry(
                     query=query,
@@ -161,14 +177,7 @@ if query := st.chat_input("Ask about your course material..."):
             progress.empty()
 
             if not chunks:
-                st.warning(
-                    "⚠️ I couldn't find relevant course material for that question. "
-                    "Try rephrasing or removing filters."
-                )
-                st.session_state.messages.append(
-                    {"role": "assistant", "content": "⚠️ No relevant material found."}
-                )
-                st.rerun()
+                _render_no_material_warning()
 
             if retried_query and retried_query != query:
                 st.caption(f"Retried search with a clarified query: `{retried_query}`")
@@ -184,9 +193,7 @@ if query := st.chat_input("Ask about your course material..."):
             )
 
             if isinstance(answer, str):
-                answer = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", answer)
-                answer = re.sub(r"\s+([.,;:!?])", r"\1", answer)
-                answer = re.sub(r" {2,}", " ", answer)
+                answer = _clean_streamed_answer(answer)
 
             timings["generate"] = time.perf_counter() - t0
 

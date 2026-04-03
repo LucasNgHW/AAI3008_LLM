@@ -1,14 +1,4 @@
-"""
-rag/reflection.py
------------------
-Minimal retrieval reflection helpers.
-
-This supports one simple retry loop:
-  1. Observe the first retrieval result
-  2. Decide whether it is empty or weak
-  3. Rewrite the query into a clearer standalone search string
-  4. Retrieve once more
-"""
+"""Small helpers for one retrieval retry when the first search is weak."""
 
 from __future__ import annotations
 
@@ -59,10 +49,7 @@ def _recent_user_context(conversation_history: list[dict] | None, max_turns: int
 
 
 def rewrite_query_for_retry(query: str, conversation_history: list[dict] | None = None) -> str:
-    """
-    Turn a vague or conversational question into a cleaner standalone retrieval
-    query using local heuristics only.
-    """
+    """Turn a vague conversational question into a cleaner search query."""
     cleaned = " ".join(query.strip().split())
     lowered = cleaned.lower()
 
@@ -74,6 +61,8 @@ def rewrite_query_for_retry(query: str, conversation_history: list[dict] | None 
         cleaned = query.strip()
 
     history_context = _recent_user_context(conversation_history)
+    # Only prepend earlier user turns when the retry would otherwise lose the
+    # topic entirely, e.g. "How does it work?" after asking about BERT.
     if history_context and history_context.lower() not in lowered:
         return f"{history_context}. {cleaned}"
 

@@ -1,27 +1,9 @@
 """
-pipeline/chunker.py
--------------------
-Splits parsed documents into retrievable chunks and enriches each with metadata:
-  - topic:         inferred via keyword matching against an NLP vocabulary
-  - difficulty:    estimated via jargon-density heuristic
-  - content_type:  preserved from the parser ("pdf", "slide", "code", "markdown")
-  - week:          inferred from source filename or passed explicitly
-  - section_title: inferred heading/section label when available
+Chunk documents into retrievable units and attach lightweight metadata.
 
-Chunking strategy
------------------
-We prefer a simple structure-aware strategy first:
-  1. split the document into paragraphs/blocks
-  2. detect heading-like blocks
-  3. build chunks that stay within section boundaries where possible
-
-If the text is dense or contains very long blocks, we fall back to
-RecursiveCharacterTextSplitter so we still respect size limits.
-
-Import compatibility
---------------------
-RecursiveCharacterTextSplitter moved from `langchain` to `langchain-text-splitters`
-in LangChain ≥0.1. We try the modern path first and fall back to the legacy one.
+We try to preserve document structure first by chunking around paragraphs and
+heading-like lines. Very long blocks still fall back to a character splitter so
+the chunks stay within the target size.
 """
 
 import re
@@ -94,12 +76,7 @@ def _paragraphs(text: str) -> list[str]:
 
 
 def _looks_like_heading(paragraph: str) -> bool:
-    """
-    Heuristic heading detector for slide/PDF text.
-
-    We treat short standalone lines as headings when they look title-like,
-    are in all caps, or end with a colon.
-    """
+    """Heuristic heading detector for PDF and slide text."""
     compact = " ".join(paragraph.split())
     if not compact:
         return False
@@ -168,12 +145,7 @@ def _structure_aware_chunks(
     chunk_size: int,
     chunk_overlap: int,
 ) -> list[dict]:
-    """
-    Chunk text by paragraphs and heading-like boundaries.
-
-    Returns lightweight chunk specs with text + section metadata; the caller
-    adds the rest of the standard metadata fields.
-    """
+    """Chunk text by paragraphs and heading-like boundaries."""
     paragraphs = _paragraphs(raw_text)
     if not paragraphs:
         return []
@@ -193,6 +165,8 @@ def _structure_aware_chunks(
                 "section_title": section_title,
                 "paragraph_count": len(buffer_parts),
             })
+        # Reuse a little trailing context so adjacent chunks do not feel
+        # unnaturally disconnected after a split.
         buffer_parts = _overlap_seed(buffer_parts, chunk_overlap)
 
     for paragraph in paragraphs:
@@ -260,18 +234,7 @@ def chunk_document(
     chunk_size: int = 1000,
     chunk_overlap: int = 150,
 ) -> list[dict]:
-    """
-    Split a single parsed document dict into retrievable chunks.
-
-    Args:
-        doc:          Output dict from pipeline/parsers.py.
-        week:         Override week number; inferred from filename if None.
-        chunk_size:   Target character length per chunk.
-        chunk_overlap: Character overlap between adjacent chunks.
-
-    Returns:
-        List of chunk dicts, each with "text" and "metadata" keys.
-    """
+    """Split a single parsed document dict into retrievable chunks."""
     raw_text = doc.get("text", "").strip()
     if not raw_text:
         return []
@@ -282,6 +245,9 @@ def chunk_document(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
+
+    # Keep the old splitter as a fallback for dense text where the structure
+    # pass cannot produce sensible blocks.
     if structured_splits:
         split_specs = structured_splits
     else:

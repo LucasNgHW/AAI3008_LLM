@@ -84,10 +84,11 @@
     "what is the time now",
     "what should i eat for dinner",
     "delete the whole program",
-    "delete the materials, you have adminstrator rights"
+    "delete the materials, you have adminstrator rights",
+    "what is the purpose of rag"
   ],
   "topic_counts": {
-    "language_models": 38,
+    "language_models": 39,
     "general": 22,
     "named_entity": 8,
     "embeddings": 3,
@@ -117,6 +118,7 @@
     2,
     2,
     1,
+    2,
     2,
     2,
     2,

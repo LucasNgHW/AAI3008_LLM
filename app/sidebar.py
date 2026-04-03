@@ -1,8 +1,4 @@
-"""
-app/sidebar.py
---------------
-Sidebar rendering and sidebar-triggered actions for the Streamlit UI.
-"""
+"""Sidebar rendering and sidebar actions."""
 
 from __future__ import annotations
 
@@ -28,6 +24,10 @@ class SidebarState:
     diff_sel: str
     use_reranker: bool
     show_timings: bool
+
+
+def _set_material_notice(level: str, message: str) -> None:
+    st.session_state["materials_notice"] = {"level": level, "message": message}
 
 
 def _render_profile_section(user_id: str) -> None:
@@ -59,10 +59,7 @@ def _render_materials_section(materials: list[dict]) -> None:
     if st.button("Delete All Materials", key="delete_all_materials"):
         with st.spinner("Deleting all materials from the database and Qdrant..."):
             result = delete_all_materials_everywhere()
-        st.session_state["materials_notice"] = {
-            "level": "success" if result["deleted"] else "error",
-            "message": result["message"],
-        }
+        _set_material_notice("success" if result["deleted"] else "error", result["message"])
         st.rerun()
 
     for material in materials[:6]:
@@ -75,10 +72,7 @@ def _render_materials_section(materials: list[dict]) -> None:
 
     if st.button("Delete Selected", key="delete_selected_materials"):
         if not selected_materials:
-            st.session_state["materials_notice"] = {
-                "level": "warning",
-                "message": "Select at least one material to delete.",
-            }
+            _set_material_notice("warning", "Select at least one material to delete.")
             st.rerun()
 
         deleted_names: list[str] = []
@@ -99,20 +93,22 @@ def _render_materials_section(materials: list[dict]) -> None:
                     f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
                 )
             message_parts.extend(failed_messages)
-            st.session_state["materials_notice"] = {
-                "level": "error",
-                "message": " ".join(message_parts),
-            }
+            _set_material_notice("error", " ".join(message_parts))
         else:
-            st.session_state["materials_notice"] = {
-                "level": "success" if deleted_names else "warning",
-                "message": (
-                    f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
-                    if deleted_names
-                    else "No selected materials were deleted."
-                ),
-            }
+            message = (
+                f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
+                if deleted_names
+                else "No selected materials were deleted."
+            )
+            _set_material_notice("success" if deleted_names else "warning", message)
         st.rerun()
+
+
+def _build_material_options(materials: list[dict]) -> dict[str, str | None]:
+    options = {"Any": None}
+    for material in materials:
+        options[material["filename"]] = build_material_source(material)
+    return options
 
 
 def render_sidebar() -> SidebarState:
@@ -135,10 +131,7 @@ def render_sidebar() -> SidebarState:
         st.subheader("Retrieval Filters")
         st.caption("Optionally restrict answers by stored course material or difficulty.")
 
-        material_options = {"Any": None}
-        for material in materials:
-            material_options[material["filename"]] = build_material_source(material)
-
+        material_options = _build_material_options(materials)
         material_sel = st.selectbox("Course Material", list(material_options.keys()))
         diff_sel = st.selectbox("Difficulty", ["Any", "beginner", "intermediate", "advanced"])
         use_reranker = st.toggle("Enable reranker (more accurate, slower)", value=True)
