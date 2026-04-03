@@ -23,10 +23,11 @@ from qdrant_client.models import (
     PointStruct,
     PayloadSchemaType,
 )
+from project_paths import QDRANT_STORAGE_DIR
 
 COLLECTION_NAME = "nlp_course"
 VECTOR_DIM      = 384
-STORAGE_PATH    = "./qdrant_storage"
+STORAGE_PATH    = str(QDRANT_STORAGE_DIR)
 
 KEYWORD_SCHEMA = getattr(PayloadSchemaType, "KEYWORD", "keyword")
 INTEGER_SCHEMA = getattr(PayloadSchemaType, "INTEGER", "integer")

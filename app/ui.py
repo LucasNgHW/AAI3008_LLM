@@ -36,6 +36,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 import streamlit as st
+from project_paths import PROFILES_DIR
 from rag.retriever            import retrieve_with_context
 from rag.reranker             import rerank
 from rag.generator            import generate_answer, generate_answer_stream
@@ -208,9 +209,9 @@ with st.sidebar:
         st.session_state.messages = []
         st.rerun()
     if st.button("Reset my learning profile"):
-        profile_path = f"./profiles/{user_id}.json"
-        if os.path.exists(profile_path):
-            os.remove(profile_path)
+        profile_path = PROFILES_DIR / f"{user_id}.json"
+        if profile_path.exists():
+            profile_path.unlink()
         st.cache_resource.clear()
         st.success("Profile reset.")
         st.rerun()

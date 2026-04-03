@@ -20,6 +20,7 @@ Usage:
 import argparse
 import time
 
+from project_paths import RAW_DATA_DIR
 from pipeline.parsers  import parse_directory
 from pipeline.chunker  import chunk_documents
 from pipeline.embedder import embed_chunks, warmup as embed_warmup
@@ -27,7 +28,7 @@ from pipeline.indexer  import setup_collection, index_chunks, collection_info
 from pipeline.material_ingestion import ingest_all_materials
 
 
-def run_ingestion(data_dir: str = "./data/raw", recreate: bool = False) -> None:
+def run_ingestion(data_dir: str = str(RAW_DATA_DIR), recreate: bool = False) -> None:
     start = time.time()
     print(f"\n{'='*60}")
     print(f"NLP Assistant — Data Ingestion Pipeline")
@@ -85,7 +86,7 @@ def run_db_ingestion(recreate: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the NLP Assistant ingestion pipeline.")
-    parser.add_argument("--dir",      default="./data/raw", help="Directory of raw course files")
+    parser.add_argument("--dir",      default=str(RAW_DATA_DIR), help="Directory of raw course files")
     parser.add_argument("--recreate", action="store_true",  help="Drop and recreate the collection")
     parser.add_argument("--from-db",  action="store_true",  help="Ingest PDFs stored in the SQLite materials database")
     args = parser.parse_args()

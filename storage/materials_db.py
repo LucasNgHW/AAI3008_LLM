@@ -12,7 +12,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path("./data/materials.db")
+from project_paths import MATERIALS_DB_PATH
+
+DB_PATH = MATERIALS_DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS materials (

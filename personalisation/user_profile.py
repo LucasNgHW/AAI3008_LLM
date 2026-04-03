@@ -23,9 +23,11 @@ import logging
 from collections import Counter
 from pathlib import Path
 
+from project_paths import PROFILES_DIR as DEFAULT_PROFILES_DIR
+
 logger = logging.getLogger(__name__)
 
-PROFILES_DIR   = "./profiles"
+PROFILES_DIR   = DEFAULT_PROFILES_DIR
 ROLLING_WINDOW = 10   # recent interactions used for difficulty inference
 
 ALL_TOPICS = [
