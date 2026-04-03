@@ -21,7 +21,13 @@ from pipeline.indexer import (
     setup_collection,
 )
 from pipeline.parsers import parse_file
-from storage.materials_db import delete_all_materials, delete_material, get_material, list_materials
+from storage.materials_db import (
+    count_materials,
+    delete_all_materials,
+    delete_material,
+    get_material,
+    list_materials,
+)
 
 
 def _db_source_label(material: dict) -> str:
@@ -82,6 +88,36 @@ def ingest_all_materials(recreate: bool = False) -> int:
         first = False
 
     return total_chunks
+
+
+def sync_qdrant_with_db() -> dict:
+    """
+    Rebuild Qdrant from the current SQLite contents.
+
+    This is the safest way to keep retrieval aligned with the database after
+    uploads or deletions because it removes any stale vectors left behind by
+    older indexing runs.
+    """
+    material_count = count_materials()
+
+    if material_count == 0:
+        client = get_client()
+        if collection_exists():
+            client.delete_collection(COLLECTION_NAME)
+        return {
+            "ok": True,
+            "material_count": 0,
+            "chunk_count": 0,
+            "message": "Qdrant cleared because the materials database is empty.",
+        }
+
+    chunk_count = ingest_all_materials(recreate=True)
+    return {
+        "ok": True,
+        "material_count": material_count,
+        "chunk_count": chunk_count,
+        "message": f"Rebuilt Qdrant from {material_count} stored material(s).",
+    }
 
 
 def delete_material_everywhere(material_id: int) -> dict:

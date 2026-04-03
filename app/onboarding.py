@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from pipeline.material_ingestion import ingest_all_materials
+from pipeline.material_ingestion import sync_qdrant_with_db
 from storage.materials_db import count_materials
 
 from app.ui_helpers import save_uploaded_pdfs
@@ -37,10 +37,15 @@ def render_material_upload_gate() -> None:
         if not uploaded_files:
             st.warning("Please upload at least one PDF.")
         else:
-            with st.spinner("Saving PDFs and indexing them..."):
-                save_uploaded_pdfs(uploaded_files)
-                ingest_all_materials(recreate=True)
-            st.success("Course materials stored in the database and indexed successfully.")
+            try:
+                with st.spinner("Saving PDFs and indexing them..."):
+                    save_uploaded_pdfs(uploaded_files)
+                    sync_qdrant_with_db()
+                    st.session_state.messages = []
+            except Exception as exc:
+                st.error(f"Could not index the uploaded PDFs: {exc}")
+            else:
+                st.success("Course materials stored in the database and indexed successfully.")
             st.rerun()
 
     st.stop()
