@@ -37,6 +37,7 @@ if ROOT_DIR not in sys.path:
 
 import streamlit as st
 from project_paths import PROFILES_DIR
+from rag.reflection           import rewrite_query_for_retry, should_retry_retrieval
 from rag.router               import route_query
 from rag.retriever            import retrieve_with_context
 from rag.reranker             import rerank
@@ -358,6 +359,26 @@ if query := st.chat_input("Ask about your course material..."):
             )
             timings["retrieve"] = time.perf_counter() - t0
 
+            retried_query: str | None = None
+            if should_retry_retrieval(chunks):
+                progress.progress(25, text="Retrying with a clarified query…")
+                retried_query = rewrite_query_for_retry(
+                    query=query,
+                    conversation_history=st.session_state.messages[:-1],
+                )
+                if retried_query and retried_query != query:
+                    t0 = time.perf_counter()
+                    retry_chunks = retrieve_with_context(
+                        query=retried_query,
+                        conversation_history=None,
+                        user_profile=profile.to_dict(),
+                        top_k=first_stage_k,
+                        **filter_kwargs,
+                    )
+                    timings["retrieve_retry"] = time.perf_counter() - t0
+                    if retry_chunks:
+                        chunks = retry_chunks
+
             # Stage 2: rerank
             progress.progress(50, text="Reranking results…")
             if use_reranker and chunks:
@@ -372,6 +393,9 @@ if query := st.chat_input("Ask about your course material..."):
                 st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
                 st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
                 st.rerun()
+
+            if retried_query and retried_query != query:
+                st.caption(f"Retried search with a clarified query: `{retried_query}`")
 
             # Stage 3: stream generation — renders tokens as they arrive
             t0 = time.perf_counter()
