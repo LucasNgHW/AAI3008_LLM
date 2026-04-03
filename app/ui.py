@@ -1,4 +1,4 @@
-"""Main Streamlit page for the NLP learning assistant."""
+"""Main Streamlit page for the learning assistant."""
 
 import os
 import re
@@ -29,7 +29,7 @@ from storage.materials_db import init_db
 
 
 st.set_page_config(
-    page_title="NLP Learning Assistant",
+    page_title="Learning Assistant",
     page_icon="📚",
     layout="wide",
 )
@@ -75,9 +75,9 @@ def _render_no_material_warning() -> None:
     st.rerun()
 
 
-st.title("NLP Learning Assistant")
+st.title("Learning Assistant")
 st.caption(
-    "Ask anything about your NLP course. "
+    "Ask anything about your uploaded course materials. "
     "I'll retrieve the most relevant material and tailor the answer to your level."
 )
 
@@ -86,9 +86,8 @@ render_material_upload_gate()
 
 if not st.session_state.messages:
     st.info(
-        "👋 Welcome! Ask me anything about your NLP course. "
-        "Try starting with a topic like *transformers*, *tokenisation*, "
-        "or *sentiment analysis*."
+        "👋 Welcome! Ask me anything about your uploaded course materials. "
+        "I can only answer questions based on what you have uploaded."
     )
 
 
@@ -102,7 +101,7 @@ for msg in st.session_state.messages:
                 render_timings(msg["timings"])
 
 
-if query := st.chat_input("Ask about your course material..."):
+if query := st.chat_input("Ask about your uploaded materials..."):
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -176,7 +175,14 @@ if query := st.chat_input("Ask about your course material..."):
             progress.progress(100, text="Generating answer…")
             progress.empty()
 
-            if not chunks:
+            # Relevance gate: refuse to generate if no chunks or all scores are too low.
+            # Cosine similarity below this threshold means the retrieved material
+            # is unrelated to the question (e.g. baking PDFs for an NLP question).
+            _LOW_RELEVANCE_THRESHOLD = 0.30
+            best_score = (
+                max((c.get("score", 0) for c in chunks), default=0) if chunks else 0
+            )
+            if not chunks or best_score < _LOW_RELEVANCE_THRESHOLD:
                 _render_no_material_warning()
 
             if retried_query and retried_query != query:

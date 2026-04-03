@@ -72,7 +72,7 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
             "Use relatable analogies to make abstract ideas concrete."
         ),
         "intermediate": (
-            "Use correct NLP terminology, explain the intuition behind each idea, "
+            "Use correct terminology, explain the intuition behind each idea, "
             "and connect new concepts to ones the student has already seen."
         ),
         "advanced":     (
@@ -82,10 +82,15 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
     }.get(difficulty, "Explain concepts clearly with appropriate depth.")
 
     lines = [
-        "You are a personalised NLP learning assistant for university students.",
-        "Answer questions about Natural Language Processing using only the course material "
-        "provided in the <context> block. You may synthesise across multiple chunks, "
-        "but do not add outside facts unless clearly labeled as general background.",
+        "You are a personalised learning assistant for university students.",
+        "Answer questions using ONLY the information provided in the <context> block below.",
+        "Do NOT use outside knowledge, your training data, or general background — "
+        "even if you believe you know the answer. Your prior knowledge is irrelevant here.",
+        "If the context block says 'No relevant course material was retrieved', or if the "
+        "retrieved material does not contain information relevant to the question, you MUST "
+        "respond with exactly: 'I cannot find information about this in your uploaded "
+        "materials. Please upload relevant course materials or ask about something covered "
+        "in them.' Do not attempt to answer from memory.",
         "",
         "Student profile:",
         f"  - Current level: {difficulty}",
