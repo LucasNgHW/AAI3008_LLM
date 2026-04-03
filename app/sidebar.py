@@ -11,7 +11,6 @@ from project_paths import PROFILES_DIR
 from pipeline.material_ingestion import (
     delete_all_materials_everywhere,
     delete_material_everywhere,
-    sync_qdrant_with_db,
 )
 from storage.materials_db import list_materials
 
@@ -60,16 +59,6 @@ def _render_materials_section(materials: list[dict]) -> None:
     if st.button("Delete All Materials", key="delete_all_materials"):
         with st.spinner("Deleting all materials from the database and Qdrant..."):
             result = delete_all_materials_everywhere()
-            if result["deleted"]:
-                try:
-                    sync_qdrant_with_db()
-                except Exception as exc:
-                    result = {
-                        "deleted": False,
-                        "message": f"{result['message']} Re-sync failed: {exc}",
-                    }
-                else:
-                    st.session_state.messages = []
         _set_material_notice("success" if result["deleted"] else "error", result["message"])
         st.rerun()
 
@@ -96,14 +85,6 @@ def _render_materials_section(materials: list[dict]) -> None:
                 else:
                     failed_messages.append(result["message"])
                 st.session_state.pop(f"select_material_{material['id']}", None)
-
-            if deleted_names:
-                try:
-                    sync_qdrant_with_db()
-                except Exception as exc:
-                    failed_messages.append(f"Re-sync failed after deletion: {exc}")
-                else:
-                    st.session_state.messages = []
 
         if failed_messages:
             message_parts = []
