@@ -20,7 +20,6 @@ asking about an advanced topic simply gets no results. Difficulty filtering is o
 applied when the caller explicitly passes `difficulty_filter`.
 """
 
-import os
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue
 
@@ -29,6 +28,60 @@ from pipeline.indexer  import get_client, COLLECTION_NAME
 
 # Maximum characters from recent history appended to the query vector
 _HISTORY_QUERY_CHARS = 200
+_FOLLOW_UP_PREFIXES = (
+    "what about",
+    "how about",
+    "what does that mean",
+    "why is that",
+    "why does that",
+    "tell me more",
+    "more on",
+    "explain more",
+    "can you elaborate",
+    "elaborate",
+    "go deeper",
+    "compare that",
+    "compare them",
+)
+_FOLLOW_UP_REFERENTS = {
+    "it", "its", "they", "them", "their", "that", "this", "these", "those",
+}
+
+
+def _looks_like_follow_up(query: str) -> bool:
+    """
+    Heuristic: only carry conversation context into retrieval when the user's
+    new message depends on earlier turns, e.g. "how does it work?".
+
+    This prevents old slide/topic context from dominating retrieval when the
+    student switches to a fresh standalone question.
+    """
+    lowered = query.strip().lower()
+    if not lowered:
+        return False
+
+    if lowered.startswith(_FOLLOW_UP_PREFIXES):
+        return True
+
+    tokens = lowered.replace("?", " ").replace(",", " ").split()
+    if len(tokens) <= 8 and any(token in _FOLLOW_UP_REFERENTS for token in tokens):
+        return True
+
+    return False
+
+
+def _recent_user_context(conversation_history: list[dict], max_chars: int = _HISTORY_QUERY_CHARS) -> str:
+    """Return recent user turns only, capped to the last max_chars."""
+    recent_user_turns = [
+        turn["content"].strip()
+        for turn in conversation_history
+        if turn.get("role") == "user" and turn.get("content", "").strip()
+    ]
+    if not recent_user_turns:
+        return ""
+
+    context = " ".join(recent_user_turns[-2:])
+    return context[-max_chars:]
 
 
 def retrieve(
@@ -144,11 +197,9 @@ def retrieve_with_context(
         Same structure as retrieve().
     """
     augmented_query = query
-    if conversation_history:
-        recent = conversation_history[-3:]
-        context_str = " ".join(
-            turn["content"] for turn in recent if turn.get("content")
-        )
-        augmented_query = f"{context_str} {query}"
+    if conversation_history and _looks_like_follow_up(query):
+        context_str = _recent_user_context(conversation_history)
+        if context_str:
+            augmented_query = f"{context_str} {query}"
 
     return retrieve(augmented_query, top_k=top_k, **filter_kwargs)

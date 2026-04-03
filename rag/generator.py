@@ -126,9 +126,9 @@ def build_user_prompt(
                 source_name = raw_source.rsplit("/", 1)[-1]
             else:
                 source_name = Path(raw_source).name
-            meta = (
-                # ... your existing meta line unchanged
-            )
+            difficulty = chunk.get("difficulty") or "unknown"
+            topic = chunk.get("topic") or "general"
+            meta = f"(source: {source_name}, topic: {topic}, difficulty: {difficulty})"
             clean_chunk_text = clean_answer_text(chunk["text"])
             context_blocks.append(f"Source {i}: {meta}\n{clean_chunk_text}")
         context_str = "\n\n".join(context_blocks)
