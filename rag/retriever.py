@@ -162,6 +162,8 @@ def retrieve(
             "week":         p.payload.get("week"),
             "source":       p.payload.get("source"),
             "slide":        p.payload.get("slide"),
+            "section_title": p.payload.get("section_title"),
+            "paragraph_count": p.payload.get("paragraph_count"),
         }
         for p in points
     ]

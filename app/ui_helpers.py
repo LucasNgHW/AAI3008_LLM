@@ -74,11 +74,18 @@ def render_sources(sources: list[dict]) -> None:
         for i, src in enumerate(sources, start=1):
             score_val = src.get("rerank_score", src.get("score", "?"))
             score_str = f"{score_val:.3f}" if isinstance(score_val, float) else str(score_val)
+            extra_meta = []
+            if src.get("section_title"):
+                extra_meta.append(f"section: `{src['section_title']}`")
+            if src.get("slide") is not None:
+                extra_meta.append(f"slide: `{src['slide']}`")
+            extra_meta_str = " | " + " | ".join(extra_meta) if extra_meta else ""
 
             st.markdown(
                 f"**[{i}]** `{src.get('difficulty', '?')}` | "
                 f"score: `{score_str}` | "
                 f"*{build_source_label(src.get('source'))}*"
+                f"{extra_meta_str}"
             )
 
             preview = src.get("text", "")

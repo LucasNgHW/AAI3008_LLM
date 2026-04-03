@@ -140,7 +140,18 @@ def build_user_prompt(
                 source_name = Path(raw_source).name
             difficulty = chunk.get("difficulty") or "unknown"
             topic = chunk.get("topic") or "general"
-            meta = f"(source: {source_name}, topic: {topic}, difficulty: {difficulty})"
+            section_title = chunk.get("section_title")
+            slide = chunk.get("slide")
+            meta_parts = [
+                f"source: {source_name}",
+                f"topic: {topic}",
+                f"difficulty: {difficulty}",
+            ]
+            if section_title:
+                meta_parts.append(f"section: {section_title}")
+            if slide is not None:
+                meta_parts.append(f"slide: {slide}")
+            meta = f"({', '.join(meta_parts)})"
             clean_chunk_text = clean_answer_text(chunk["text"])
             context_blocks.append(f"Source {i}: {meta}\n{clean_chunk_text}")
         context_str = "\n\n".join(context_blocks)

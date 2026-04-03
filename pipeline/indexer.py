@@ -5,7 +5,8 @@ Indexes embedded chunks into a local Qdrant collection.
 
 Collection schema:
   - Vector:  384-dim cosine similarity (from all-MiniLM-L6-v2)
-  - Payload: text, source, topic, difficulty, content_type, week, slide, cell_type, chunk_index
+  - Payload: text, source, topic, difficulty, content_type, week, slide,
+             cell_type, section_title, paragraph_count, chunk_index
 
 Qdrant is run in local (on-disk) mode during development.
 To switch to a hosted Qdrant Cloud instance, replace QdrantClient(path=...)
@@ -110,6 +111,8 @@ def index_chunks(chunks: list[dict], batch_size: int = 256) -> None:
             "week":         chunk["metadata"].get("week"),
             "slide":        chunk["metadata"].get("slide"),
             "cell_type":    chunk["metadata"].get("cell_type"),
+            "section_title": chunk["metadata"].get("section_title"),
+            "paragraph_count": chunk["metadata"].get("paragraph_count"),
             "chunk_index":  chunk["metadata"].get("chunk_index"),
             "material_id":  chunk["metadata"].get("material_id"),
         }
