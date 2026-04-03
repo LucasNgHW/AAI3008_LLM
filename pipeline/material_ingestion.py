@@ -12,7 +12,14 @@ from pathlib import Path
 
 from pipeline.chunker import chunk_documents
 from pipeline.embedder import embed_chunks
-from pipeline.indexer import COLLECTION_NAME, delete_material_chunks, get_client, index_chunks, setup_collection
+from pipeline.indexer import (
+    COLLECTION_NAME,
+    collection_exists,
+    delete_material_chunks,
+    get_client,
+    index_chunks,
+    setup_collection,
+)
 from pipeline.parsers import parse_file
 from storage.materials_db import delete_all_materials, delete_material, get_material, list_materials
 
@@ -77,32 +84,92 @@ def ingest_all_materials(recreate: bool = False) -> int:
     return total_chunks
 
 
-def delete_material_everywhere(material_id: int) -> bool:
+def delete_material_everywhere(material_id: int) -> dict:
     """
     Delete one material from both SQLite and Qdrant.
+
+    Returns a status dict so the UI can report whether Qdrant cleanup was
+    verified before the SQLite row was removed.
     """
     material = get_material(material_id)
     if material is None:
-        return False
+        return {
+            "deleted": False,
+            "filename": None,
+            "reason": "missing",
+            "message": "Material not found in the database.",
+        }
 
-    delete_material_chunks(material_id, source_label=_db_source_label(material))
-    return delete_material(material_id)
+    filename = material["filename"]
+    source_label = _db_source_label(material)
+
+    try:
+        qdrant_deleted = delete_material_chunks(material_id, source_label=source_label)
+    except Exception as exc:
+        return {
+            "deleted": False,
+            "filename": filename,
+            "reason": "qdrant_error",
+            "message": f"Qdrant deletion failed for {filename}: {exc}",
+        }
+
+    if not qdrant_deleted:
+        return {
+            "deleted": False,
+            "filename": filename,
+            "reason": "qdrant_verify_failed",
+            "message": f"Could not verify Qdrant cleanup for {filename}; the database record was kept.",
+        }
+
+    deleted_in_db = delete_material(material_id)
+    if not deleted_in_db:
+        return {
+            "deleted": False,
+            "filename": filename,
+            "reason": "db_delete_failed",
+            "message": f"Qdrant chunks were removed but the database row for {filename} could not be deleted.",
+        }
+
+    return {
+        "deleted": True,
+        "filename": filename,
+        "reason": "ok",
+        "message": f"Deleted {filename} from the database and Qdrant.",
+    }
 
 
-def delete_all_materials_everywhere() -> int:
+def delete_all_materials_everywhere() -> dict:
     """
     Delete all materials from SQLite and clear the Qdrant collection.
 
-    Returns the number of SQLite material rows deleted.
+    Returns a status dict so the UI can report whether Qdrant cleanup was
+    verified before database rows were removed.
     """
+    client = get_client()
+    if collection_exists():
+        try:
+            client.delete_collection(COLLECTION_NAME)
+        except Exception as exc:
+            return {
+                "deleted": False,
+                "deleted_count": 0,
+                "reason": "qdrant_error",
+                "message": f"Failed to clear the Qdrant collection: {exc}",
+            }
+
+        if collection_exists():
+            return {
+                "deleted": False,
+                "deleted_count": 0,
+                "reason": "qdrant_verify_failed",
+                "message": "Could not verify that the Qdrant collection was cleared; database rows were kept.",
+            }
+
     deleted_count = delete_all_materials()
 
-    client = get_client()
-    try:
-        existing = [c.name for c in client.get_collections().collections]
-        if COLLECTION_NAME in existing:
-            client.delete_collection(COLLECTION_NAME)
-    except Exception:
-        pass
-
-    return deleted_count
+    return {
+        "deleted": True,
+        "deleted_count": deleted_count,
+        "reason": "ok",
+        "message": f"Deleted {deleted_count} material(s) and cleared the Qdrant collection.",
+    }

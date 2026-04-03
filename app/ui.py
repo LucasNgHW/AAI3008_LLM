@@ -148,10 +148,10 @@ with st.sidebar:
 
         if st.button("Delete All Materials", key="delete_all_materials"):
             with st.spinner("Deleting all materials from the database and Qdrant..."):
-                deleted_count = delete_all_materials_everywhere()
+                result = delete_all_materials_everywhere()
             st.session_state["materials_notice"] = {
-                "level": "success",
-                "message": f"Deleted {deleted_count} material(s) and cleared the Qdrant collection.",
+                "level": "success" if result["deleted"] else "error",
+                "message": result["message"],
             }
             st.rerun()
 
@@ -172,21 +172,36 @@ with st.sidebar:
                 st.rerun()
 
             deleted_names: list[str] = []
+            failed_messages: list[str] = []
             with st.spinner("Deleting selected materials from the database and Qdrant..."):
                 for material in selected_materials:
-                    deleted = delete_material_everywhere(material["id"])
-                    if deleted:
+                    result = delete_material_everywhere(material["id"])
+                    if result["deleted"]:
                         deleted_names.append(material["filename"])
+                    else:
+                        failed_messages.append(result["message"])
                     st.session_state.pop(f"select_material_{material['id']}", None)
 
-            st.session_state["materials_notice"] = {
-                "level": "success" if deleted_names else "warning",
-                "message": (
-                    f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
-                    if deleted_names
-                    else "No selected materials were deleted."
-                ),
-            }
+            if failed_messages:
+                message_parts = []
+                if deleted_names:
+                    message_parts.append(
+                        f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
+                    )
+                message_parts.extend(failed_messages)
+                st.session_state["materials_notice"] = {
+                    "level": "error",
+                    "message": " ".join(message_parts),
+                }
+            else:
+                st.session_state["materials_notice"] = {
+                    "level": "success" if deleted_names else "warning",
+                    "message": (
+                        f"Deleted {len(deleted_names)} material(s): {', '.join(deleted_names)}."
+                        if deleted_names
+                        else "No selected materials were deleted."
+                    ),
+                }
             st.rerun()
     else:
         st.caption("No course PDFs stored yet.")

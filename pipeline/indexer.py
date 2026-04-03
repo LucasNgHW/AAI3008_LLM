@@ -142,28 +142,82 @@ def collection_info() -> dict:
         return {"name": COLLECTION_NAME, "vectors_count": 0, "status": "not found"}
 
 
-def delete_material_chunks(material_id: int, source_label: str | None = None) -> None:
+def collection_exists() -> bool:
+    """Return True if the Qdrant collection currently exists."""
+    client = get_client()
+    try:
+        existing = [c.name for c in client.get_collections().collections]
+    except Exception:
+        return False
+    return COLLECTION_NAME in existing
+
+
+def _material_filter(material_id: int, source_label: str | None = None) -> Filter:
+    should_conditions = [FieldCondition(key="material_id", match=MatchValue(value=material_id))]
+    if source_label:
+        should_conditions.append(FieldCondition(key="source", match=MatchValue(value=source_label)))
+    return Filter(should=should_conditions)
+
+
+def count_material_chunks(material_id: int, source_label: str | None = None) -> int:
+    """
+    Count Qdrant points for one material.
+
+    Returns 0 if the collection does not exist.
+    """
+    if not collection_exists():
+        return 0
+
+    client = get_client()
+    material_filter = _material_filter(material_id, source_label)
+
+    try:
+        result = client.count(
+            collection_name=COLLECTION_NAME,
+            count_filter=material_filter,
+            exact=True,
+        )
+        return int(getattr(result, "count", result))
+    except Exception:
+        try:
+            result = client.count(
+                collection_name=COLLECTION_NAME,
+                filter=material_filter,
+                exact=True,
+            )
+            return int(getattr(result, "count", result))
+        except Exception:
+            return 0
+
+
+def delete_material_chunks(material_id: int, source_label: str | None = None) -> bool:
     """
     Delete Qdrant points for one material.
 
     We match both `material_id` and `source` so this works for newly indexed
     chunks and also older DB-ingested chunks that only carried the source label.
     """
+    if not collection_exists():
+        return True
+
     client = get_client()
-    should_conditions = [FieldCondition(key="material_id", match=MatchValue(value=material_id))]
-    if source_label:
-        should_conditions.append(FieldCondition(key="source", match=MatchValue(value=source_label)))
+    material_filter = _material_filter(material_id, source_label)
+    before_count = count_material_chunks(material_id, source_label)
+    if before_count == 0:
+        return True
 
     try:
         client.delete(
             collection_name=COLLECTION_NAME,
-            points_selector=Filter(should=should_conditions),
+            points_selector=material_filter,
         )
     except Exception:
         try:
             client.delete(
                 collection_name=COLLECTION_NAME,
-                filter=Filter(should=should_conditions),
+                filter=material_filter,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError(f"Failed to delete Qdrant chunks for material {material_id}") from exc
+
+    return count_material_chunks(material_id, source_label) == 0
