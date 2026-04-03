@@ -178,6 +178,7 @@ if query := st.chat_input("Ask about your course material..."):
 
             if not chunks:
                 _render_no_material_warning()
+                st.stop()
 
             if retried_query and retried_query != query:
                 st.caption(f"Retried search with a clarified query: `{retried_query}`")
