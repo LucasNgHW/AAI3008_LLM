@@ -101,6 +101,11 @@ AAI3008_LLM/
 python -m venv .venv
 source .venv/bin/activate
 ```
+#### For Windows:
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+```
 
 Or use Conda if preferred.
 
