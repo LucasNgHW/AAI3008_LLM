@@ -1,0 +1,30 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Editor and OS clutter
+.DS_Store
+.Rhistory
+.idea/
+.vscode/
+
+# Local application state
+data/materials.db
+qdrant_storage/
+profiles/*.json
+!profiles/.gitkeep
