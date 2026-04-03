@@ -37,9 +37,10 @@ if ROOT_DIR not in sys.path:
 
 import streamlit as st
 from project_paths import PROFILES_DIR
+from rag.router               import route_query
 from rag.retriever            import retrieve_with_context
 from rag.reranker             import rerank
-from rag.generator            import generate_answer, generate_answer_stream
+from rag.generator            import generate_answer_stream, stream_direct_answer
 from personalisation.user_profile import UserProfile
 from pipeline.material_ingestion import (
     delete_all_materials_everywhere,
@@ -310,52 +311,70 @@ if query := st.chat_input("Ask about your course material..."):
         if diff_sel != "Any":
             filter_kwargs["difficulty_filter"] = diff_sel
 
-        # Stage 1: retrieve
-        first_stage_k = 15 if use_reranker else 5
-        progress = st.progress(0, text="Searching course materials…")
-        t0 = time.perf_counter()
-        chunks = retrieve_with_context(
+        route = route_query(
             query=query,
+            selected_source=selected_source,
             conversation_history=st.session_state.messages[:-1],
-            user_profile=profile.to_dict(),
-            top_k=first_stage_k,
-            **filter_kwargs,
         )
-        timings["retrieve"] = time.perf_counter() - t0
+        chunks: list[dict] = []
 
-        # Stage 2: rerank
-        progress.progress(50, text="Reranking results…")
-        if use_reranker and chunks:
+        if route == "direct":
+            st.caption("Route: direct answer")
             t0 = time.perf_counter()
-            chunks = rerank(query, chunks, top_n=5)
-            timings["rerank"] = time.perf_counter() - t0
-
-        progress.progress(100, text="Generating answer…")
-        progress.empty()
-
-        best_score = chunks[0].get("rerank_score", chunks[0].get("score", 0)) if chunks else 0
-        if not chunks:
-            st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
-            st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
-            st.rerun()
-
-        # Stage 3: stream generation — renders tokens as they arrive
-        t0 = time.perf_counter()
-        answer = st.write_stream(
-            generate_answer_stream(
-                query=query,
-                chunks=chunks,
-                user_profile=profile.to_dict(),
-                conversation_history=st.session_state.messages[:-1],
+            answer = st.write_stream(
+                stream_direct_answer(
+                    query=query,
+                    user_profile=profile.to_dict(),
+                    conversation_history=st.session_state.messages[:-1],
+                )
             )
-        )
+            timings["generate"] = time.perf_counter() - t0
+        else:
+            # Stage 1: retrieve
+            first_stage_k = 15 if use_reranker else 5
+            progress = st.progress(0, text="Searching course materials…")
+            t0 = time.perf_counter()
+            chunks = retrieve_with_context(
+                query=query,
+                conversation_history=st.session_state.messages[:-1],
+                user_profile=profile.to_dict(),
+                top_k=first_stage_k,
+                **filter_kwargs,
+            )
+            timings["retrieve"] = time.perf_counter() - t0
 
-        if isinstance(answer, str):
-            answer = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", answer)
-            answer = re.sub(r"\s+([.,;:!?])", r"\1", answer)
-            answer = re.sub(r" {2,}", " ", answer)
+            # Stage 2: rerank
+            progress.progress(50, text="Reranking results…")
+            if use_reranker and chunks:
+                t0 = time.perf_counter()
+                chunks = rerank(query, chunks, top_n=5)
+                timings["rerank"] = time.perf_counter() - t0
 
-        timings["generate"] = time.perf_counter() - t0
+            progress.progress(100, text="Generating answer…")
+            progress.empty()
+
+            if not chunks:
+                st.warning("⚠️ I couldn't find relevant course material for that question. Try rephrasing or removing filters.")
+                st.session_state.messages.append({"role": "assistant", "content": "⚠️ No relevant material found."})
+                st.rerun()
+
+            # Stage 3: stream generation — renders tokens as they arrive
+            t0 = time.perf_counter()
+            answer = st.write_stream(
+                generate_answer_stream(
+                    query=query,
+                    chunks=chunks,
+                    user_profile=profile.to_dict(),
+                    conversation_history=st.session_state.messages[:-1],
+                )
+            )
+
+            if isinstance(answer, str):
+                answer = re.sub(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", "", answer)
+                answer = re.sub(r"\s+([.,;:!?])", r"\1", answer)
+                answer = re.sub(r" {2,}", " ", answer)
+
+            timings["generate"] = time.perf_counter() - t0
 
         # Rating buttons
         col1, col2 = st.columns([1, 1])
@@ -376,9 +395,10 @@ if query := st.chat_input("Ask about your course material..."):
         "content": answer,
         "sources": chunks,
         "timings": timings,
+        "route":   route,
     })
 
-    if chunks:
+    if route == "rag" and chunks:
         from pipeline.chunker import infer_difficulty
         top_chunk = chunks[0]
         from pipeline.chunker import infer_difficulty

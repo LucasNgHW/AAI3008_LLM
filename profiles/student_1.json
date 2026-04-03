@@ -15,14 +15,23 @@
     "what are some examples of RAG?",
     "what is a naive rag?",
     "what is a self rag?",
-    "what is tokenisation?"
+    "what is tokenisation?",
+    "Explain transformers from lecture 3",
+    "compare BERT and GPT",
+    "what is the best chicken rice in singapore?",
+    "what is naive RAG?",
+    "what is an example of naive RAG",
+    "what is a lLM?",
+    "what is multimodal ethics?",
+    "what is multimodal ethics?"
   ],
   "topic_counts": {
-    "language_models": 8,
-    "general": 4,
-    "named_entity": 1,
-    "embeddings": 1,
-    "tokenisation": 1
+    "language_models": 10,
+    "general": 5,
+    "named_entity": 3,
+    "embeddings": 3,
+    "tokenisation": 1,
+    "transformers": 1
   },
   "difficulty_scores": [
     2,
@@ -37,6 +46,14 @@
     2,
     2,
     2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    1,
     2,
     2,
     2

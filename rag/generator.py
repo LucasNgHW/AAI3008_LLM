@@ -105,6 +105,18 @@ def build_system_prompt(user_profile: dict | None = None) -> str:
     return "\n".join(lines)
 
 
+def build_direct_system_prompt(user_profile: dict | None = None) -> str:
+    difficulty = (user_profile or {}).get("preferred_difficulty", "intermediate")
+    return "\n".join([
+        "You are a helpful university learning assistant.",
+        "This response is for a direct conversational/help request, not a course-content retrieval question.",
+        "Answer briefly and clearly.",
+        f"Adapt your tone to the student's level: {difficulty}.",
+        "If the student asks for course-specific content, tell them to ask a question about their uploaded materials.",
+        "Do not invent references to slides or PDFs.",
+    ])
+
+
 def build_user_prompt(
     query: str,
     chunks: list[dict],
@@ -166,6 +178,29 @@ def _make_prompt(
     )
 
 
+def _make_direct_prompt(
+    query: str,
+    user_profile: dict | None,
+    conversation_history: list[dict] | None,
+) -> str:
+    history_str = ""
+    if conversation_history:
+        recent = conversation_history[-2:]
+        lines = [
+            f"{'Student' if t['role'] == 'user' else 'Assistant'}: {t['content'].strip()}"
+            for t in recent
+            if t.get("content", "").strip()
+        ]
+        if lines:
+            history_str = "\n".join(lines)[-MAX_HISTORY_CHARS:]
+
+    parts = [build_direct_system_prompt(user_profile)]
+    if history_str:
+        parts.append(f"<conversation_history>\n{history_str}\n</conversation_history>")
+    parts.append(f"Student message: {query}")
+    return "\n\n".join(parts)
+
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def stream_answer(
@@ -198,6 +233,38 @@ def stream_answer(
     """
     client = get_client()
     prompt = _make_prompt(query, chunks, user_profile, conversation_history)
+
+    try:
+        for chunk in client.models.generate_content_stream(
+            model=MODEL,
+            contents=prompt,
+        ):
+            text = getattr(chunk, "text", None)
+            if text:
+                yield clean_answer_text(text)
+    except Exception as exc:
+        err = str(exc)
+        if "429" in err or "quota" in err.lower() or "rate" in err.lower():
+            yield (
+                "\n\n⚠️ **Gemini quota limit reached.** "
+                "Please try again later, use a different API key/project, "
+                "or switch to a paid/billed API setup."
+            )
+        else:
+            raise
+
+
+def stream_direct_answer(
+    query: str,
+    user_profile: dict | None = None,
+    conversation_history: list[dict] | None = None,
+) -> Iterator[str]:
+    """
+    Stream a short direct response for conversational/help queries that do not
+    require retrieval.
+    """
+    client = get_client()
+    prompt = _make_direct_prompt(query, user_profile, conversation_history)
 
     try:
         for chunk in client.models.generate_content_stream(
