@@ -1,0 +1,15 @@
+{
+  "user_id": "student_4",
+  "query_history": [
+    "what is text processing ",
+    "what is embeddings"
+  ],
+  "topic_counts": {
+    "tokenisation": 1,
+    "embeddings": 1
+  },
+  "difficulty_scores": [
+    2,
+    2
+  ]
+}
