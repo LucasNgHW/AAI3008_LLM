@@ -109,10 +109,10 @@ source .venv/Scripts/activate
 
 Or use Conda if preferred.
 
-### 2. Install dependencies
+### 2. Install dependencies (Might take a while to download)
 
 ```bash
-python -m pip install -r requirements.txt (Might take a while to download)
+python -m pip install -r requirements.txt
 ```
 
 ### 3. Set your Gemini API key
